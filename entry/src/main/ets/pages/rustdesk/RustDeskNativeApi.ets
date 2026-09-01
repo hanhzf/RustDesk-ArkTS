@@ -71,6 +71,7 @@ import {
   sessionSetCustomFps as bridgeSessionSetCustomFps,
   sessionSetCustomImageQuality as bridgeSessionSetCustomImageQuality,
   sessionSetImageQuality as bridgeSessionSetImageQuality,
+  sessionSetPrivacyMode as bridgeSessionSetPrivacyMode,
   sessionSetShowRemoteCursor as bridgeSessionSetShowRemoteCursor,
   sessionSetSize as bridgeSessionSetSize,
   sessionSetViewOnly as bridgeSessionSetViewOnly,
@@ -370,6 +371,10 @@ export class RustDeskNativeApi {
 
   sessionSetImageQuality(sessionId: string, value: string): string {
     return bridgeSessionSetImageQuality(sessionId, value);
+  }
+
+  sessionSetPrivacyMode(sessionId: string, implKey: string, enabled: boolean): string {
+    return bridgeSessionSetPrivacyMode(sessionId, implKey, enabled);
   }
 
   sessionSetShowRemoteCursor(sessionId: string, enabled: boolean): string {

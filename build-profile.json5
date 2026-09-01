@@ -48,6 +48,10 @@
           ]
         }
       ]
+    },
+    {
+      "name": "luminous_neo",
+      "srcPath": "./luminous_neo"
     }
   ]
 }

@@ -36,6 +36,9 @@ export interface SessionToolbarProps {
   systemImeActive: boolean;
   audioAvailable: boolean;
   audioMuted: boolean;
+  privacyModeAvailable: boolean;
+  privacyModeEnabled: boolean;
+  privacyModeBusy: boolean;
   wideLayout: boolean;
   transformSummary: string;
   canResetTransform: boolean;
@@ -55,6 +58,7 @@ export interface SessionToolbarProps {
   onToggleSystemIme: () => void;
   onToggleAndroidNavigation: () => void;
   onAudioChange: (enabled: boolean) => void;
+  onPrivacyModeChange: (enabled: boolean) => void;
   onDisconnect: () => void;
   onCollapse: () => void;
   onMinimizeWindow: () => void;
@@ -96,6 +100,9 @@ export struct SessionToolbar {
   @Param systemImeActive: boolean = false;
   @Param audioAvailable: boolean = false;
   @Param audioMuted: boolean = false;
+  @Param privacyModeAvailable: boolean = false;
+  @Param privacyModeEnabled: boolean = false;
+  @Param privacyModeBusy: boolean = false;
   @Param wideLayout: boolean = false;
   @Param transformSummary: string = '100%';
   @Param canResetTransform: boolean = false;
@@ -115,6 +122,7 @@ export struct SessionToolbar {
   @Event onToggleSystemIme: () => void = () => {};
   @Event onToggleAndroidNavigation: () => void = () => {};
   @Event onAudioChange: (enabled: boolean) => void = (_enabled: boolean) => {};
+  @Event onPrivacyModeChange: (enabled: boolean) => void = (_enabled: boolean) => {};
   @Event onDisconnect: () => void = () => {};
   @Event onCollapse: () => void = () => {};
   @Event onMinimizeWindow: () => void = () => {};
@@ -562,7 +570,7 @@ export struct SessionToolbar {
           ? (selected ? $r('app.color.white') : $r('app.color.neu_text_primary'))
           : $r('app.color.neu_text_disabled'));
     }
-    .width(key === 'transform' ? 92 : (key === 'android-navigation' ? 84 : 68))
+    .width(key === 'transform' ? 92 : (key === 'android-navigation' || key === 'privacy-mode' ? 84 : 68))
     .height($r('app.float.control_compact'))
     .padding({ left: $r('app.float.space_6'), right: $r('app.float.space_6') })
     .enabled(enabled)
@@ -691,6 +699,16 @@ export struct SessionToolbar {
   private ToolbarUtilityActions() {
     Row({ space: $r('app.float.space_6') }) {
       this.TransformControls()
+      if (this.privacyModeAvailable) {
+        this.CompactAction(
+          'privacy-mode',
+          this.privacyModeBusy ? '切换中' : '隐私屏幕',
+          this.privacyModeEnabled,
+          false,
+          !this.privacyModeBusy,
+          () => this.onPrivacyModeChange(!this.privacyModeEnabled),
+        )
+      }
       this.CompactAction('refresh-display', '刷新画面', false, false, this.refreshDisplayEnabled,
         () => this.onRefreshDisplay())
       if (this.windowControlsAvailable) {
@@ -712,6 +730,16 @@ export struct SessionToolbar {
       }
       .layoutWeight(1);
 
+      if (this.privacyModeAvailable) {
+        this.CompactAction(
+          'privacy-mode',
+          this.privacyModeBusy ? '切换中' : '隐私屏幕',
+          this.privacyModeEnabled,
+          false,
+          !this.privacyModeBusy,
+          () => this.onPrivacyModeChange(!this.privacyModeEnabled),
+        )
+      }
       this.CompactAction('refresh-display', '刷新画面', false, false, this.refreshDisplayEnabled,
         () => this.onRefreshDisplay())
       if (this.windowControlsAvailable) {

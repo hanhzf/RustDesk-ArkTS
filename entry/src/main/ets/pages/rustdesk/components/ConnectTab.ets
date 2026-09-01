@@ -380,7 +380,7 @@ export struct ConnectTab {
           this.connectionMode = index;
         },
       })
-        .margin({ top: -6 })
+        .margin({ top: 12 })
         .translate({ x: this.compactControlVisualOffsetX() })
 
       LuminousTextField({
@@ -391,7 +391,7 @@ export struct ConnectTab {
         motionEnabled: true,
         onChange: (value: string): void => this.onTargetChange(value),
       })
-        .margin({ top: -26 })
+        .margin({ top: 12 })
         .translate({ x: this.compactControlVisualOffsetX() })
 
       LuminousButton({
@@ -404,7 +404,7 @@ export struct ConnectTab {
         motionEnabled: true,
         onAction: (): void => this.activatePrimaryAction(),
       })
-        .margin({ top: -28 })
+        .margin({ top: 12 })
         .translate({ x: this.compactControlVisualOffsetX() })
 
       if (this.easyTierAvailable) {
@@ -423,7 +423,7 @@ export struct ConnectTab {
         .width(this.controlWidth())
         .padding({ left: 4, right: 4 })
         .alignItems(VerticalAlign.Center)
-        .margin({ top: -16 })
+        .margin({ top: 10 })
 
         Row() {
           LuminousSecondaryMenu({
@@ -445,7 +445,7 @@ export struct ConnectTab {
         .alignItems(VerticalAlign.Center)
         .clip(false)
         .zIndex(200)
-        .margin({ top: -22 })
+        .margin({ top: 10 })
         .translate({ x: this.compactControlVisualOffsetX() })
       }
 
@@ -458,7 +458,7 @@ export struct ConnectTab {
           motionEnabled: true,
           onAction: (): void => this.onDisconnect(),
         })
-          .margin({ top: -22 })
+          .margin({ top: 10 })
           .translate({ x: this.compactControlVisualOffsetX() })
       }
     }

@@ -1,0 +1,11 @@
+{
+  "module": {
+    "name": "luminous_neo",
+    "type": "har",
+    "deviceTypes": [
+      "phone",
+      "tablet",
+      "2in1"
+    ]
+  }
+}
