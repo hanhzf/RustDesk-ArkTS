@@ -5,11 +5,9 @@ import { SavedConnectionSettings } from './RustDeskTypes';
 
 const PREF_NAME = 'rustdesk_connection';
 const TARGET_KEY = 'target';
-const TARGET_RECORDED_KEY = 'target_recorded';
 const PASSWORD_KEY = 'password';
 const REMEMBER_PASSWORD_KEY = 'remember_password';
 export const DOWNLOAD_ROOT_URI_KEY = 'download_root_uri';
-const LEGACY_DEFAULT_TARGET = '10.52.176.1';
 const LEGACY_DEFAULT_RELATIVE_MOUSE_KEY = 'default_relative_mouse';
 const DEFAULT_TOUCH_MODE_KEY = 'default_touch_mode_v2';
 const DEFAULT_RELATIVE_MOUSE_KEY = 'default_relative_mouse_v2';
@@ -97,10 +95,9 @@ export class RustDeskPreferences {
     }
     try {
       const rawTarget = store.getSync(TARGET_KEY, '') as string;
-      const targetRecorded = store.getSync(TARGET_RECORDED_KEY, false) as boolean;
       this.clearLegacyPassword(store);
       return {
-        target: this.normalizeLoadedTarget(rawTarget, targetRecorded),
+        target: rawTarget.trim(),
         password: '',
         rememberPassword: false,
       };
@@ -120,7 +117,6 @@ export class RustDeskPreferences {
     }
     try {
       store.putSync(TARGET_KEY, target.trim());
-      store.putSync(TARGET_RECORDED_KEY, true);
       store.flushSync();
     } catch (_) {
     }
@@ -368,14 +364,6 @@ export class RustDeskPreferences {
       store.flushSync();
     } catch (_) {
     }
-  }
-
-  private normalizeLoadedTarget(target: string, targetRecorded: boolean): string {
-    const normalizedTarget = target.trim();
-    if (!targetRecorded && normalizedTarget === LEGACY_DEFAULT_TARGET) {
-      return '';
-    }
-    return normalizedTarget;
   }
 
   private clearLegacyPassword(store: preferences.Preferences): void {
