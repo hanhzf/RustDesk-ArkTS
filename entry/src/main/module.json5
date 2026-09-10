@@ -22,7 +22,7 @@
     "abilities": [
       {
         "name": "EntryAbility",
-        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "srcEntry": "./ets/entryability/ModernEntryAbility.ets",
         "description": "$string:EntryAbility_desc",
         "label": "$string:EntryAbility_label",
         "icon": "$media:resk",
