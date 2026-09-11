@@ -554,8 +554,9 @@ export class EasyTierApiService {
     try {
       const payload = await this.readResult();
       const event = this.validateResult(payload, pending);
-      this.finishPending(event, pending);
-      this.deliver(event);
+      if (this.finishPending(event, pending)) {
+        this.deliver(event);
+      }
     } catch (error) {
       const message = EasyTierApiService.errorMessage(error as Object);
       const event = new EasyTierApiResultEvent(
@@ -565,8 +566,9 @@ export class EasyTierApiService {
         'INTERNAL_ERROR',
         message,
       );
-      this.finishPending(event, pending);
-      this.deliver(event);
+      if (this.finishPending(event, pending)) {
+        this.deliver(event);
+      }
     } finally {
       this.activeRequestIds.delete(requestId);
     }
@@ -662,7 +664,13 @@ export class EasyTierApiService {
     return new EasyTierApiResultEvent(false, pending.requestId, pending.operation, 'INVALID_RESULT', message);
   }
 
-  private finishPending(event: EasyTierApiResultEvent, pending: EasyTierApiPendingRequest): void {
+  private finishPending(event: EasyTierApiResultEvent, pending: EasyTierApiPendingRequest): boolean {
+    // readResult is asynchronous: cancellation/new target may have replaced the request meanwhile.
+    // Never consume the new intent or deliver a stale result to its preflight.
+    const current = EasyTierApiService.loadPendingRequest(this.context);
+    if (current === undefined || current.requestId !== pending.requestId) {
+      return false;
+    }
     const intent = EasyTierApiService.loadConnectionIntent(this.context);
     if (intent !== undefined) {
       event.target = intent.target;
@@ -675,6 +683,7 @@ export class EasyTierApiService {
       event.code = 'MISSING_CONNECTION_INTENT';
       event.message = 'RustDesk 待恢复连接已丢失或过期';
     }
+    return true;
   }
 
   private deliver(event: EasyTierApiResultEvent): void {

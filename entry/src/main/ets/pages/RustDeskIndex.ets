@@ -8,6 +8,10 @@ import {
   hdsMaterial,
 } from '@kit.UIDesignKit';
 import { rustDeskNativeApi as native } from './rustdesk/RustDeskNativeApi';
+import { sendNativeMouse } from './rustdesk/RustDeskMouseTransport';
+import { hasRetainedSoftwareSubmission, isSoftwarePresentCodec, shouldSelectSoftwarePresent, SoftwarePresentObserver, SoftwarePresentSnapshot } from '../services/SoftwarePresentState';
+import { FrameRateTelemetry, parseFrameRateSnapshot } from '../services/FrameRateTelemetry';
+import { NativeDecoderTelemetry } from '../services/NativeDecoderTelemetry';
 import { common, OpenLinkOptions } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { BusinessError, Callback, deviceInfo } from '@kit.BasicServicesKit';
@@ -87,7 +91,7 @@ import {
   RustDeskMousePayload,
   RustDeskSize,
 } from './rustdesk/RustDeskInputMapper';
-import { RustDeskViewportModel } from './rustdesk/RustDeskViewportModel';
+import { RustDeskViewportModel, updatePeerDisplayGeometry } from './rustdesk/RustDeskViewportModel';
 import {
   RemoteSessionOrientationMode,
   RemoteSessionOrientationPolicy,
@@ -151,6 +155,7 @@ import {
   EasyTierInstanceSummary,
   EasyTierSnapshotEvent,
 } from '../services/EasyTierApiService';
+import { createEasyTierReadinessController } from '../services/EasyTierSocketProbe';
 import {
   ActionResponse,
   DecoderCapability,
@@ -392,7 +397,12 @@ struct RustDeskIndex {
   private pollTimer: number = -1;
   private passwordTimeoutId: number = -1;
   private eventPollInFlight: boolean = false;
-  private previewFrameInFlight: boolean = false;
+  private softwarePresentObserver: SoftwarePresentObserver = new SoftwarePresentObserver();
+  private softwarePresentGeneration: string = '';
+  private softwarePresentSelected: boolean = false;
+  private softwarePresentBinding: string = '';
+  private frameRateTelemetry: FrameRateTelemetry = new FrameRateTelemetry();
+  private nativeDecoderTelemetry: NativeDecoderTelemetry = new NativeDecoderTelemetry();
   private performanceTuningApplied: boolean = false;
   private previewSurfaceId: string = '';
   private previewSurfaceSetupInFlight: boolean = false;
@@ -536,6 +546,8 @@ struct RustDeskIndex {
   @Local easyTierRequestPending: boolean = false;
   @Local easyTierInstances: EasyTierInstanceSummary[] = [];
   private easyTierSnapshotFresh: boolean = false;
+  private easyTierPreflightGeneration: number = 0;
+  private readonly easyTierReadiness = createEasyTierReadinessController();
   private easyTierResultListenerRegistered: boolean = false;
   private onEasyTierApiResult = (result: EasyTierApiResultEvent): void => {
     EasyTierApiService.clearBufferedResult(result.requestId);
@@ -598,6 +610,7 @@ struct RustDeskIndex {
   }
 
   aboutToDisappear(): void {
+    this.invalidateEasyTierReadiness();
     this.rejectPendingInsecureConnection();
     this.clearActiveSessionHandoffState();
     this.unregisterRemoteSessionHandoffListener();
@@ -2005,6 +2018,9 @@ struct RustDeskIndex {
 
   private updatePeerTarget(value: string): void {
     if (value !== this.peerTarget) {
+      if (this.connectionUiPhase === 'waiting_for_easytier') {
+        this.cancelEasyTierRequest();
+      }
       this.passwordDraft = '';
       this.rememberPassword = false;
     }
@@ -2020,6 +2036,7 @@ struct RustDeskIndex {
   }
 
   private setEasyTierPreconnectEnabled(enabled: boolean): void {
+    this.invalidateEasyTierReadiness();
     this.easyTierPreconnectEnabled = enabled;
     this.preferences?.saveEasyTierEnabled(enabled);
     if (!enabled) {
@@ -2044,6 +2061,9 @@ struct RustDeskIndex {
     const instance = this.findEasyTierInstance(this.easyTierInstances, instanceId);
     if (instance === undefined) {
       return;
+    }
+    if (instanceId !== this.easyTierSelectedInstanceId && this.connectionUiPhase === 'waiting_for_easytier') {
+      this.cancelEasyTierRequest();
     }
     this.updateSelectedEasyTierInstance(instance);
     if (!this.easyTierPreconnectEnabled) {
@@ -2075,8 +2095,13 @@ struct RustDeskIndex {
     }
 
     const context = this.abilityContext();
+    this.invalidateEasyTierReadiness();
+    const generation = this.easyTierPreflightGeneration;
     this.beginEasyTierPreconnect(target, kind, '正在读取 EasyTier 实例状态');
     const snapshot = await EasyTierApiService.readSnapshot(context);
+    if (generation !== this.easyTierPreflightGeneration) {
+      return;
+    }
     this.easyTierRequestPending = false;
     this.applyEasyTierSnapshot(snapshot);
     if (!snapshot.ok) {
@@ -2107,6 +2132,7 @@ struct RustDeskIndex {
   }
 
   private async launchPeerDirect(target: string, kind: PeerLaunchKind): Promise<void> {
+    this.invalidateEasyTierReadiness();
     this.updatePeerTarget(target);
     this.preferences?.saveTarget(target);
     if (kind === 'file_transfer') {
@@ -2147,12 +2173,15 @@ struct RustDeskIndex {
 
   private async requestEasyTierStart(instanceId: string): Promise<void> {
     this.easyTierRequestPending = true;
+    const generation = this.easyTierPreflightGeneration;
     const outcome = await EasyTierApiService.request(
       this.abilityContext(),
       EASYTIER_OPERATION_START_INSTANCE,
       instanceId,
     );
-    this.handleEasyTierRequestOutcome(outcome);
+    if (generation === this.easyTierPreflightGeneration) {
+      this.handleEasyTierRequestOutcome(outcome);
+    }
   }
 
   private handleEasyTierRequestOutcome(outcome: EasyTierApiRequestOutcome): void {
@@ -2174,6 +2203,10 @@ struct RustDeskIndex {
   }
 
   private async applyEasyTierApiResult(result: EasyTierApiResultEvent): Promise<void> {
+    // EasyTier can return before onPageShow; visibility is not request ownership.
+    if (!this.easyTierPreconnectEnabled || result.target !== this.peerTarget.trim()) {
+      return;
+    }
     this.easyTierRequestPending = false;
     this.easyTierStatusText = result.message;
     if (result.operation === EASYTIER_OPERATION_START_INSTANCE) {
@@ -2188,9 +2221,7 @@ struct RustDeskIndex {
       }
       this.updateSelectedEasyTierInstance(result.instance);
       this.easyTierStatusText = this.easyTierInstanceStatus(result.instance);
-      this.connectionUiPhase = 'idle';
-      this.connectionUiMessage = '';
-      await this.launchPeerDirect(result.target, result.kind);
+      await this.launchPeerAfterEasyTierReadiness(result.target, result.kind);
     }
   }
 
@@ -2259,11 +2290,8 @@ struct RustDeskIndex {
     this.updateSelectedEasyTierInstance(instance);
     if (snapshotFresh && instance.state === EASYTIER_STATE_RUNNING) {
       EasyTierApiService.clearConnectionIntent(this.abilityContext());
-      this.easyTierRequestPending = false;
-      this.connectionUiPhase = 'idle';
-      this.connectionUiMessage = '';
       this.easyTierStatusText = this.easyTierInstanceStatus(instance, true);
-      await this.launchPeerDirect(intent.target, intent.kind);
+      await this.launchPeerAfterEasyTierReadiness(intent.target, intent.kind);
       return;
     }
     this.beginEasyTierPreconnect(
@@ -2303,11 +2331,49 @@ struct RustDeskIndex {
   }
 
   private cancelEasyTierRequest(): void {
+    this.invalidateEasyTierReadiness();
     EasyTierApiService.cancelPending(this.abilityContext());
     this.easyTierRequestPending = false;
     this.connectionUiPhase = 'idle';
     this.connectionUiMessage = '';
     this.easyTierStatusText = '已取消 EasyTier 预组网';
+  }
+
+  private invalidateEasyTierReadiness(): void {
+    this.easyTierPreflightGeneration += 1;
+    this.easyTierReadiness.cancel();
+    if (this.connectionUiPhase === 'waiting_for_easytier') {
+      EasyTierApiService.cancelPending(this.abilityContext());
+      this.connectionUiPhase = 'idle';
+      this.connectionUiMessage = '';
+    }
+    this.easyTierRequestPending = false;
+  }
+
+  private async launchPeerAfterEasyTierReadiness(target: string, kind: PeerLaunchKind): Promise<void> {
+    this.invalidateEasyTierReadiness();
+    const generation = this.easyTierPreflightGeneration;
+    const resources = this.abilityContext().resourceManager;
+    this.beginEasyTierPreconnect(target, kind, resources.getStringSync($r('app.string.easytier_readiness_waiting').id));
+    const result = await this.easyTierReadiness.wait(true, target, (attempt: number, maximum: number): void => {
+      if (generation === this.easyTierPreflightGeneration) {
+        const message = resources.getStringSync($r('app.string.easytier_readiness_progress').id, attempt, maximum);
+        this.connectionUiMessage = message;
+        this.easyTierStatusText = message;
+      }
+    });
+    if (generation !== this.easyTierPreflightGeneration || result === 'cancelled') {
+      return;
+    }
+    if (result === 'exhausted') {
+      this.failEasyTierPreconnect(target, kind, resources.getStringSync($r('app.string.easytier_readiness_exhausted').id));
+      return;
+    }
+    this.easyTierRequestPending = false;
+    this.connectionUiPhase = 'idle';
+    this.connectionUiMessage = '';
+    // A TCP accept is not RustDesk/authentication success. Core now owns the only session attempt.
+    await this.launchPeerDirect(target, kind);
   }
 
   private showEasyTierToast(message: string): void {
@@ -2574,6 +2640,7 @@ struct RustDeskIndex {
     kind: PrimarySessionKind,
     handoff?: RemoteSessionHandoffEnvelope,
   ): Promise<void> {
+    this.invalidateEasyTierReadiness();
     if (this.sessionCloseInFlight) {
       return;
     }
@@ -2945,6 +3012,7 @@ struct RustDeskIndex {
   }
 
   private async switchRemoteSessionTab(sessionId: string): Promise<void> {
+    this.invalidateEasyTierReadiness();
     if (this.sessionTransitionBusy()) {
       this.pendingSessionSwitchId = sessionId;
       return;
@@ -3173,6 +3241,7 @@ struct RustDeskIndex {
   }
 
   private async closeSession(reason?: string, preserveConnectionFailure: boolean = false): Promise<void> {
+    this.invalidateEasyTierReadiness();
     if (this.sessionConnectInFlight || this.sessionSwitchInFlight) {
       if (this.activeSessionId.length > 0) {
         this.queueClosedSession(this.activeSessionId);
@@ -6020,9 +6089,9 @@ struct RustDeskIndex {
       return;
     }
     try {
-      const response = this.parseResponse(native.sessionSendMouse(sessionId, JSON.stringify(payload)));
-      if (!response.ok && reportFailure && this.activeSessionId === sessionId) {
-        this.errorText = response.message ?? 'Mouse input failed';
+      const sent = sendNativeMouse(native, sessionId, payload);
+      if (!sent && reportFailure && this.activeSessionId === sessionId) {
+        this.errorText = 'Mouse input failed';
       }
     } catch (error) {
       if (reportFailure && this.activeSessionId === sessionId) {
@@ -6391,15 +6460,10 @@ struct RustDeskIndex {
     const x = Number(event.x ?? `${previous.x}`);
     const y = Number(event.y ?? `${previous.y}`);
     const updatedDisplays = this.peerDisplays.slice();
-    updatedDisplays[display] = {
-      width: Math.round(width),
-      height: Math.round(height),
-      x: Number.isFinite(x) ? x : previous.x,
-      y: Number.isFinite(y) ? y : previous.y,
-      cursor_embedded: previous.cursor_embedded,
-      original_width: previous.original_width,
-      original_height: previous.original_height,
-    };
+    updatedDisplays[display] = updatePeerDisplayGeometry(
+      previous, Math.round(width), Math.round(height),
+      Number.isFinite(x) ? x : previous.x, Number.isFinite(y) ? y : previous.y,
+    );
     this.peerDisplays = updatedDisplays;
     if (event.resolutions !== undefined) {
       this.supportedResolutions = this.parseSupportedResolutions(event.resolutions);
@@ -6552,8 +6616,10 @@ struct RustDeskIndex {
       if (!this.isCurrentPreviewSurface(generation, sessionId) || surfaceId !== this.previewSurfaceId) {
         return;
       }
-      this.frameWidth = rect.surfaceWidth;
-      this.frameHeight = rect.surfaceHeight;
+      if (!this.softwarePresentSelected) {
+        this.frameWidth = rect.surfaceWidth;
+        this.frameHeight = rect.surfaceHeight;
+      }
       this.viewportModel.setSurfaceSize(rect.surfaceWidth, rect.surfaceHeight);
       this.frameStatus = `Surface ready ${rect.surfaceWidth}x${rect.surfaceHeight}`;
       this.applyDisplayConfiguration();
@@ -6580,6 +6646,10 @@ struct RustDeskIndex {
     if (!this.activeSessionId || this.previewSurfaceId.length === 0) {
       return false;
     }
+    const binding = `${this.activeSessionId}:${this.previewSurfaceGeneration}:${this.viewportModel.getCurrentDisplayIndex()}:${this.previewSurfaceId}`;
+    if (this.softwarePresentBinding !== binding) {
+      this.invalidateSoftwarePresentBinding();
+    }
     try {
       const response = this.parseResponse(native.sessionBindSurface(
         this.activeSessionId,
@@ -6588,7 +6658,20 @@ struct RustDeskIndex {
       ));
       this.updateSessionState(response);
       if (!response.ok) {
+        this.invalidateSoftwarePresentBinding();
         return false;
+      }
+      this.softwarePresentBinding = binding;
+      if (this.softwarePresentObserver.selectBinding(binding)
+        && this.softwarePresentObserver.shouldPoll(Date.now())) {
+        try {
+          // Pin this binding's initial generation only; waiting is not success.
+          this.softwarePresentObserver.accept(native.sessionGetSoftwarePresentState(
+            this.activeSessionId, this.viewportModel.getCurrentDisplayIndex()),
+            this.softwarePresentObserver.token());
+        } catch (_) {
+          // A missing metadata sample must not break a working hardware Surface.
+        }
       }
       this.setSessionVideoPaused(this.activeSessionId, false);
       const activeTab = this.remoteSessionTabsController.get(this.activeSessionId);
@@ -6606,12 +6689,14 @@ struct RustDeskIndex {
       }
       return true;
     } catch (error) {
+      this.invalidateSoftwarePresentBinding();
       this.errorText = `Surface bind failed: ${String(error)}`;
       return false;
     }
   }
 
   private clearSurfaceBinding(): void {
+    this.invalidateSoftwarePresentBinding();
     if (!this.activeSessionId) {
       return;
     }
@@ -6740,6 +6825,8 @@ struct RustDeskIndex {
         }
       }
       this.pollInputInterceptorEvents();
+      this.pollSoftwarePresentMetadata();
+      this.pollFrameRateTelemetry();
       if (this.isRemoteControlSessionActive()) {
         this.ensureRemoteCursorEnabled();
       }
@@ -6944,6 +7031,7 @@ struct RustDeskIndex {
       }
       if (event.codec_format && event.codec_format.length > 0) {
         this.qualityTelemetry.codec = String(event.codec_format);
+        this.selectSoftwarePresentRoute(isSoftwarePresentCodec(this.qualityTelemetry.codec));
       }
       if (event.speed && event.speed.length > 0) {
         this.qualityTelemetry.speed = String(event.speed);
@@ -7016,6 +7104,18 @@ struct RustDeskIndex {
     const message = title.length > 0 ? `${title}: ${text}` : text;
     if (type.includes('insecure-connection')) {
       this.openInsecureConnectionDialog(text);
+      return;
+    }
+    if (type === 'custom-nook-nocancel-hasclose' && title !== 'Connection Error') {
+      // Core/Flutter's Close button dismisses this notice, not the session.
+      // In particular, strict video pause must not tear down an authenticated connection.
+      this.sessionMessage = message;
+      this.errorText = message;
+      try {
+        this.getUIContext().getPromptAction().showToast({ message, duration: 5000 });
+      } catch (_) {
+        hilog.warn(DOMAIN, TAG, 'Nonfatal session notice toast unavailable; message retained.');
+      }
       return;
     }
     if (type === 'success' || title === 'Successful') {
@@ -7167,8 +7267,127 @@ struct RustDeskIndex {
   }
 
   private invalidatePreviewFrames(): void {
+    this.invalidateSoftwarePresentBinding();
+  }
+
+  private invalidateSoftwarePresentBinding(): void {
+    this.viewportModel.clearSubmittedVideoSize();
+    this.frameRateTelemetry.reset();
+    this.nativeDecoderTelemetry.reset();
+    this.softwarePresentBinding = '';
+    this.softwarePresentObserver.selectBinding('');
+    this.softwarePresentGeneration = '';
+    this.softwarePresentSelected = false;
     this.releasePreviewFramePixelMap();
-    this.previewFrameInFlight = false;
+  }
+
+  private selectSoftwarePresentRoute(selected: boolean): void {
+    if (selected !== this.softwarePresentSelected) {
+      this.viewportModel.clearSubmittedVideoSize();
+      this.releasePreviewFramePixelMap();
+      this.softwarePresentGeneration = '';
+      this.softwarePresentSelected = selected;
+    }
+  }
+
+  private pollSoftwarePresentMetadata(): void {
+    const sessionId = this.activeSessionId;
+    const display = this.viewportModel.getCurrentDisplayIndex();
+    const binding = `${sessionId}:${this.previewSurfaceGeneration}:${display}:${this.previewSurfaceId}`;
+    if (!sessionId || !this.showPreviewModal || !this.previewSurfaceVisible
+      || this.previewSurfaceId.length === 0 || binding !== this.softwarePresentBinding
+      || !this.softwarePresentObserver.shouldPoll(Date.now())) {
+      return;
+    }
+    const token = this.softwarePresentObserver.token();
+    let raw = '';
+    try {
+      raw = native.sessionGetSoftwarePresentState(sessionId, display);
+    } catch (_) {
+      // Metadata failure is not permission to restore the retired RGB route.
+    }
+    const snapshot = this.softwarePresentObserver.accept(raw, token);
+    if (snapshot === undefined || binding !== this.softwarePresentBinding) {
+      return;
+    }
+    const codec = this.qualityTelemetry.codec.trim().toUpperCase();
+    this.selectSoftwarePresentRoute(shouldSelectSoftwarePresent(codec, snapshot));
+    if (!this.softwarePresentSelected) {
+      return;
+    }
+    if (snapshot.generation !== this.softwarePresentGeneration) {
+      this.releasePreviewFramePixelMap();
+      this.softwarePresentGeneration = snapshot.generation;
+    }
+    if (hasRetainedSoftwareSubmission(snapshot)) {
+      // Normal queue/fence backpressure leaves the last submitted native image
+      // visible. Keep its dimensions and UI status; this is not another frame.
+      return;
+    }
+    if (!snapshot.bound || snapshot.state !== 'submitted' || snapshot.submittedFrames <= 0) {
+      this.frameStatus = `NativeWindow software ${snapshot.state}: ${snapshot.reason}; zero-copy unproven`;
+      return;
+    }
+    this.applySoftwarePresentDimensions(snapshot, display);
+    this.frameStatus = `NativeWindow software submitted ${snapshot.width}x${snapshot.height}; zero-copy unproven`;
+  }
+
+  private pollFrameRateTelemetry(): void {
+    const sessionId = this.activeSessionId;
+    const display = this.viewportModel.getCurrentDisplayIndex();
+    const binding = `${sessionId}:${this.previewSurfaceGeneration}:${display}:${this.previewSurfaceId}`;
+    if (!sessionId || this.sessionPhase !== 'connected' || this.sessionCloseInFlight
+      || !this.showPreviewModal || !this.previewSurfaceVisible || this.showTransferWorkspace
+      || this.previewSurfaceId.length === 0 || binding !== this.softwarePresentBinding) {
+      this.frameRateTelemetry.reset();
+      this.nativeDecoderTelemetry.reset();
+      return;
+    }
+    // Route changes invalidate baselines even between the 1Hz observations.
+    if (this.softwarePresentSelected) {
+      this.nativeDecoderTelemetry.reset();
+    } else {
+      this.frameRateTelemetry.reset();
+    }
+    if (!this.frameRateTelemetry.shouldRead(binding, Date.now())) {
+      return;
+    }
+    let raw = '';
+    try {
+      raw = native.sessionGetFrameRateSnapshot(sessionId, display);
+    } catch (_) {
+      // Drop the baseline on a missing sample; never log raw native errors/IDs.
+    }
+    if (!this.softwarePresentSelected) {
+      // reset() preserves the existing 1Hz read gate, even on invalid samples.
+      // Do not report software zero/missing_samples as native Surface FPS.
+      this.frameRateTelemetry.reset();
+      const intent = parseFrameRateSnapshot(raw);
+      let nativeRaw = '';
+      try {
+        nativeRaw = native.sessionGetNativeDecoderSnapshot(sessionId, display);
+      } catch (_) {
+        // Only the safe invalid status is logged, never native errors or IDs.
+      }
+      hilog.info(DOMAIN, 'RustDeskNativeRate', '%{public}s',
+        this.nativeDecoderTelemetry.sample(nativeRaw, binding, intent));
+      return;
+    }
+    const submittedSize = this.viewportModel.getSubmittedVideoSize();
+    const safeWindow = this.frameRateTelemetry.sample(raw,
+      submittedSize?.width ?? 0, submittedSize?.height ?? 0);
+    if (safeWindow !== undefined) {
+      hilog.info(DOMAIN, 'RustDeskFrameRate', '%{public}s', safeWindow);
+    }
+  }
+
+  private applySoftwarePresentDimensions(snapshot: SoftwarePresentSnapshot, display: number): void {
+    if (!this.viewportModel.setSubmittedVideoSize(display, snapshot.width, snapshot.height)) {
+      return;
+    }
+    // A submission is not a display-mode update; keep authoritative fit/input geometry.
+    this.frameWidth = snapshot.width;
+    this.frameHeight = snapshot.height;
   }
 
   private releasePreviewFramePixelMap(): void {
@@ -7177,122 +7396,6 @@ struct RustDeskIndex {
     this.rgbaFallbackActive = false;
     if (previous) {
       previous.release().catch((_error: BusinessError) => {});
-    }
-  }
-
-  private updatePreviewFramePixelMap(pixelMap: image.PixelMap, width: number, height: number, display: number): void {
-    const previous = this.previewFramePixelMap;
-    this.previewFramePixelMap = pixelMap;
-    this.rgbaFallbackActive = true;
-    this.frameWidth = width;
-    this.frameHeight = height;
-    this.viewportModel.setSurfaceSize(width, height);
-    this.frameStatus = `RGBA fallback ${width}x${height}`;
-    if (previous && previous !== pixelMap) {
-      previous.release().catch((_error: BusinessError) => {});
-    }
-    if (this.pendingDisplayIndex === display) {
-      this.pendingDisplayIndex = -1;
-      this.refreshSessionOrientation();
-      if (this.previewSurfaceId.length > 0) {
-        this.syncSurfaceBinding(false);
-      }
-      this.sessionMessage = `显示器 ${display + 1} 已收到画面`;
-      this.applyDisplayConfiguration();
-      this.reprojectVirtualCursorOverlay();
-    } else {
-      this.applyDisplayConfiguration();
-    }
-  }
-
-  private consumePreviewRgbaFrame(display: number): void {
-    if (!this.activeSessionId) {
-      return;
-    }
-    if (this.previewFrameInFlight) {
-      native.sessionNextRgba(this.activeSessionId, display);
-      return;
-    }
-    const displayInfo = this.peerDisplays[display];
-    const width = Math.max(Math.round(displayInfo?.width ?? 0), 0);
-    const height = Math.max(Math.round(displayInfo?.height ?? 0), 0);
-    if (width <= 0 || height <= 0) {
-      native.sessionNextRgba(this.activeSessionId, display);
-      return;
-    }
-    const expectedLength = width * height * 4;
-    this.previewFrameInFlight = true;
-    try {
-      const rgbaSize = Number(native.sessionGetRgbaSize(this.activeSessionId, display));
-      if (rgbaSize <= 0 || rgbaSize !== expectedLength) {
-        if (rgbaSize > 0) {
-          hilog.warn(
-            DOMAIN,
-            TAG,
-            'consumePreviewRgbaFrame unexpected size display=%{public}d size=%{public}d expected=%{public}d',
-            display,
-            rgbaSize,
-            expectedLength,
-          );
-        }
-        this.previewFrameInFlight = false;
-        native.sessionNextRgba(this.activeSessionId, display);
-        return;
-      }
-      const rgbaPayload = native.sessionTakeRgbaFrame(this.activeSessionId, display) as Uint8Array | number[];
-      const rgbaLength = rgbaPayload.length;
-      if (rgbaLength !== expectedLength) {
-        hilog.warn(
-          DOMAIN,
-          TAG,
-          'consumePreviewRgbaFrame length mismatch display=%{public}d len=%{public}d expected=%{public}d',
-          display,
-          rgbaLength,
-          expectedLength,
-        );
-        this.previewFrameInFlight = false;
-        native.sessionNextRgba(this.activeSessionId, display);
-        return;
-      }
-      const rgba = rgbaPayload instanceof Uint8Array
-        ? rgbaPayload
-        : Uint8Array.from(rgbaPayload);
-      const options: image.InitializationOptions = {
-        editable: false,
-        srcPixelFormat: image.PixelMapFormat.RGBA_8888,
-        pixelFormat: image.PixelMapFormat.RGBA_8888,
-        size: { width, height },
-        alphaType: image.AlphaType.UNPREMUL,
-      };
-      image.createPixelMap(rgba.buffer, options)
-        .then((pixelMap: image.PixelMap) => {
-          this.updatePreviewFramePixelMap(pixelMap, width, height, display);
-        })
-        .catch((error: BusinessError) => {
-          hilog.error(
-            DOMAIN,
-            TAG,
-            'consumePreviewRgbaFrame createPixelMap failed display=%{public}d error=%{public}s',
-            display,
-            JSON.stringify(error) ?? String(error),
-          );
-        })
-        .finally(() => {
-          this.previewFrameInFlight = false;
-          if (this.activeSessionId) {
-            native.sessionNextRgba(this.activeSessionId, display);
-          }
-        });
-    } catch (error) {
-      this.previewFrameInFlight = false;
-      hilog.error(
-        DOMAIN,
-        TAG,
-        'consumePreviewRgbaFrame failed display=%{public}d error=%{public}s',
-        display,
-        String(error),
-      );
-      native.sessionNextRgba(this.activeSessionId, display);
     }
   }
 
@@ -7306,10 +7409,16 @@ struct RustDeskIndex {
       return;
     }
     if (event.name === 'rgba') {
-      this.consumePreviewRgbaFrame(display);
+      // Enhanced display is native-only even before codec telemetry arrives.
+      // Retire a legacy notification without fetching/copying its pixels.
+      this.releasePreviewFramePixelMap();
+      if (this.activeSessionId) {
+        native.sessionNextRgba(this.activeSessionId, display);
+      }
+      this.frameStatus = 'Legacy RGBA display disabled; native presentation required';
       return;
     }
-    if (event.name === 'texture') {
+    if (event.name === 'texture' && !this.softwarePresentSelected) {
       this.frameStatus = `Texture frame event display ${display}`;
     }
   }

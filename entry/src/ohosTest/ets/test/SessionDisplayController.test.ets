@@ -189,6 +189,26 @@ function createController(bridge: RecordingNativeSessionBridge): SessionDisplayC
 
 export default function sessionDisplayControllerTest(): void {
   describe('SessionDisplayControllerTest', () => {
+    it('keeps HiDPI initialization on the reported display without changing mode or multiplying scale', 0, () => {
+      const bridge = new RecordingNativeSessionBridge();
+      const viewport = new RustDeskViewportModel();
+      viewport.setViewportSize(1280, 800);
+      const controller = new SessionDisplayController(viewport, bridge, () => {}, () => {});
+      const peerDisplays: PeerDisplayInfo[] = [
+        { width: 7680, height: 4320, x: 0, y: 0, scaled_width: 3840, scaled_height: 2160 },
+        { width: 5120, height: 2880, x: 7680, y: 0, scaled_width: 2560, scaled_height: 1440 },
+      ];
+      controller.updatePeerInfo(peerDisplays, 1, resolutions(), 'Mac OS');
+      expect(controller.getCurrentDisplayIndex()).assertEqual(1);
+      expect(bridge.commands.length).assertEqual(0);
+      expect(viewport.setSubmittedVideoSize(1, 2560, 1440)).assertTrue();
+      expect(controller.getDisplays()[1].width).assertEqual(5120);
+      expect(controller.getDisplays()[1].scaled_width).assertEqual(2560);
+      expect(controller.selectDisplay('session-hidpi', 1)).assertTrue();
+      expect(bridge.commands.join(',')).assertEqual('switch:1,size:1:5120:2880,refresh:1');
+      expect(viewport.getSubmittedVideoSize() === undefined).assertTrue();
+    });
+
     it('selecting a display sends switch size refresh in order', 0, () => {
       const bridge = new RecordingNativeSessionBridge();
       const controller = createController(bridge);

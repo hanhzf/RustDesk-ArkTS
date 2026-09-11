@@ -1,6 +1,26 @@
 {
   "string": [
     {
+      "name": "display_badge_pixels",
+      "value": "像素 %1$d×%2$d"
+    },
+    {
+      "name": "display_badge_mode_pixels",
+      "value": "显示 %1$d×%2$d\n像素 %3$d×%4$d"
+    },
+    {
+      "name": "easytier_readiness_waiting",
+      "value": "EasyTier 已运行，正在等待目标网络可达"
+    },
+    {
+      "name": "easytier_readiness_progress",
+      "value": "EasyTier 已运行，正在等待目标网络可达（%1$d/%2$d，最多 12 秒）"
+    },
+    {
+      "name": "easytier_readiness_exhausted",
+      "value": "EasyTier 已运行，但目标端口尚不可达。请确认目标在线及直连端口已启用后重试。"
+    },
+    {
       "name": "module_desc",
       "value": "RustDesk HarmonyOS entry module"
     },

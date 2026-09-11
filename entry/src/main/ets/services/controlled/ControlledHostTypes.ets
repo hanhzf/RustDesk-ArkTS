@@ -51,6 +51,7 @@ export class ControlledHostState {
   @Trace incomingResolving: boolean = false;
   @Trace activePeerName: string = '';
   @Trace captureActive: boolean = false;
+  @Trace captureAuthorized: boolean = false;
   @Trace runningInBackground: boolean = false;
 }
 
@@ -60,6 +61,7 @@ export interface ControlledNativeActionPayload {
   ok?: boolean;
   active?: boolean;
   nativeStateCode?: number;
+  systemCaptureConfirmed?: boolean;
   framesObserved?: number;
   audioFramesObserved?: number;
   audioFramesForwarded?: number;

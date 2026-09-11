@@ -46,6 +46,7 @@ export class ControlledHostCoordinator {
   private listeners: ControlledHostStateListener[] = [];
   private pollTimer: number = -1;
   private pollInFlight: boolean = false;
+  private startProgressTimer: number = -1;
   private generation: number = 0;
   private initialized: boolean = false;
   private runtimeReady: boolean = false;
@@ -117,6 +118,7 @@ export class ControlledHostCoordinator {
     this.state.phase = 'starting';
     this.state.statusText = '正在等待系统录屏确认';
     this.state.lastError = '';
+    this.state.captureAuthorized = false;
     this.emitState();
     try {
       const backgroundStarted = await this.backgroundService?.start();
@@ -131,12 +133,18 @@ export class ControlledHostCoordinator {
       const screenJson = JSON.stringify(screenOptions);
       this.requireSuccess(this.bridge.configureScreen(screenJson), '屏幕参数配置失败');
       const startOptions = new ControlledStartOptions();
-      this.requireSuccess(this.bridge.start(JSON.stringify(startOptions)), 'RustDesk 被看服务启动失败');
-      this.state.captureActive = true;
+      const startPromise: Promise<string> = this.bridge.start(JSON.stringify(startOptions));
+      this.scheduleStartProgress(currentGeneration, POLL_INTERVAL_MS);
+      const startResponse = await startPromise;
+      this.clearStartProgress();
       if (currentGeneration !== this.generation) {
-        this.stopNativeFailClosed();
+        this.state.captureActive = false;
+        await this.stopNativeFailClosed();
         return;
       }
+      this.requireSuccess(startResponse, 'RustDesk 被看服务启动失败');
+      this.state.captureActive = true;
+      this.state.captureAuthorized = true;
       this.state.runningInBackground = this.backgroundService?.isRunning() === true;
       this.state.phase = 'ready';
       this.state.statusText = '被看服务已启用，等待远端认证';
@@ -144,32 +152,37 @@ export class ControlledHostCoordinator {
       this.emitState();
       this.schedulePoll(0);
     } catch (error) {
+      this.clearStartProgress();
+      if (currentGeneration !== this.generation) {
+        this.state.captureActive = false;
+        await this.stopNativeFailClosed();
+        return;
+      }
       this.failClosed(`启动失败：${String(error)}`);
     }
   }
 
   stop(reason: string = '被看服务已停止'): void {
-    this.generation += 1;
+    const currentGeneration = this.generation + 1;
+    this.generation = currentGeneration;
     this.clearPoll();
+    this.clearStartProgress();
     this.state.phase = 'stopping';
     this.state.statusText = reason;
     this.emitState();
-    const stopError = this.stopNativeFailClosed();
     this.backgroundService?.stop();
     this.state.captureActive = false;
+    this.state.captureAuthorized = false;
     this.state.runningInBackground = false;
     this.state.incoming = undefined;
     this.state.incomingResolving = false;
     this.resolvingRequestId = '';
     this.state.activePeerName = '';
-    if (stopError.length > 0) {
-      this.state.phase = 'failed';
-      this.state.lastError = stopError;
-      this.state.statusText = stopError;
-    } else {
-      this.state.phase = 'disabled';
-    }
+    this.state.phase = 'disabled';
+    this.state.lastError = '';
+    this.state.statusText = reason;
     this.emitState();
+    void this.finishStop(currentGeneration, reason);
   }
 
   rejectIncoming(requestId: string, peerId: string): void {
@@ -513,6 +526,34 @@ export class ControlledHostCoordinator {
     }, delayMs) as number;
   }
 
+  private scheduleStartProgress(generation: number, delayMs: number): void {
+    if (this.startProgressTimer >= 0 || generation !== this.generation || this.state.phase !== 'starting') {
+      return;
+    }
+    this.startProgressTimer = setTimeout((): void => {
+      this.startProgressTimer = -1;
+      this.refreshStartProgress(generation);
+    }, delayMs) as number;
+  }
+
+  private refreshStartProgress(generation: number): void {
+    if (generation !== this.generation || this.state.phase !== 'starting') {
+      return;
+    }
+    try {
+      const capture = JSON.parse(this.bridge.screenCaptureStatus()) as ControlledNativeActionPayload;
+      const systemConfirmed: boolean = capture.systemCaptureConfirmed === true || capture.nativeStateCode === 0;
+      if (systemConfirmed && !this.state.captureAuthorized) {
+        this.state.captureAuthorized = true;
+        this.state.statusText = '系统已允许录屏，正在等待首个视频帧';
+        this.emitState();
+      }
+    } catch (error) {
+      hilog.debug(DOMAIN, TAG, 'Capture startup progress unavailable: %{public}s', String(error));
+    }
+    this.scheduleStartProgress(generation, POLL_INTERVAL_MS);
+  }
+
   private async pollOnce(): Promise<void> {
     if (this.pollInFlight || !this.running()) {
       return;
@@ -618,7 +659,15 @@ export class ControlledHostCoordinator {
     this.pollTimer = -1;
   }
 
-  private stopNativeFailClosed(): string {
+  private clearStartProgress(): void {
+    if (this.startProgressTimer < 0) {
+      return;
+    }
+    clearTimeout(this.startProgressTimer);
+    this.startProgressTimer = -1;
+  }
+
+  private async stopNativeFailClosed(): Promise<string> {
     let message = '';
     try {
       const captureResult = JSON.parse(this.bridge.stopScreenCapture()) as ControlledNativeActionPayload;
@@ -629,7 +678,7 @@ export class ControlledHostCoordinator {
       message = `屏幕采集停止失败：${String(error)}`;
     }
     try {
-      const serverResult = JSON.parse(this.bridge.stop()) as ControlledNativeActionPayload;
+      const serverResult = JSON.parse(await this.bridge.stop()) as ControlledNativeActionPayload;
       if (serverResult.ok === false && message.length === 0) {
         message = serverResult.message ?? serverResult.lastError ?? '原生服务停止失败';
       }
@@ -641,19 +690,51 @@ export class ControlledHostCoordinator {
     return message;
   }
 
+  private async finishStop(generation: number, reason: string): Promise<void> {
+    const stopError = await this.stopNativeFailClosed();
+    if (generation !== this.generation) {
+      return;
+    }
+    if (stopError.length > 0) {
+      this.state.phase = 'failed';
+      this.state.lastError = stopError;
+      this.state.statusText = stopError;
+      this.emitState();
+      return;
+    }
+    this.state.phase = 'disabled';
+    this.state.lastError = '';
+    this.state.statusText = reason;
+    this.emitState();
+  }
+
   private failClosed(message: string): void {
-    this.generation += 1;
+    const failureGeneration = this.generation + 1;
+    this.generation = failureGeneration;
     this.clearPoll();
-    const stopError = this.stopNativeFailClosed();
+    this.clearStartProgress();
     this.backgroundService?.stop();
     this.state.captureActive = false;
+    this.state.captureAuthorized = false;
     this.state.runningInBackground = false;
     this.state.incoming = undefined;
     this.state.incomingResolving = false;
     this.resolvingRequestId = '';
     this.state.activePeerName = '';
     this.state.phase = 'failed';
-    this.state.lastError = stopError.length > 0 ? `${message}；${stopError}` : message;
+    this.state.lastError = message;
+    this.state.statusText = this.state.lastError;
+    hilog.error(DOMAIN, TAG, '%{public}s', this.state.lastError);
+    this.emitState();
+    void this.finishFailClosedCleanup(failureGeneration, message);
+  }
+
+  private async finishFailClosedCleanup(generation: number, message: string): Promise<void> {
+    const stopError = await this.stopNativeFailClosed();
+    if (generation !== this.generation || stopError.length === 0) {
+      return;
+    }
+    this.state.lastError = `${message}；${stopError}`;
     this.state.statusText = this.state.lastError;
     hilog.error(DOMAIN, TAG, '%{public}s', this.state.lastError);
     this.emitState();

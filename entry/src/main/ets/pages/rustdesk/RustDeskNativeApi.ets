@@ -46,6 +46,9 @@ import {
   sessionGetEnableTrustedDevices as bridgeSessionGetEnableTrustedDevices,
   sessionGetRemoteAudioState as bridgeSessionGetRemoteAudioState,
   sessionGetRgbaSize as bridgeSessionGetRgbaSize,
+  sessionGetSoftwarePresentState as bridgeSessionGetSoftwarePresentState,
+  sessionGetFrameRateSnapshot as bridgeSessionGetFrameRateSnapshot,
+  sessionGetNativeDecoderSnapshot as bridgeSessionGetNativeDecoderSnapshot,
   sessionGetToggleOption as bridgeSessionGetToggleOption,
   sessionHandleFlutterKeyEvent as bridgeSessionHandleFlutterKeyEvent,
   sessionInputKey as bridgeSessionInputKey,
@@ -64,6 +67,7 @@ import {
   sessionSendClipboardImage as bridgeSessionSendClipboardImage,
   sessionSendFiles as bridgeSessionSendFiles,
   sessionSendMouse as bridgeSessionSendMouse,
+  sessionSendMouseEvent as bridgeSessionSendMouseEvent,
   sessionSetCodecPreference as bridgeSessionSetCodecPreference,
   sessionSetClipboardFileRoot as bridgeSessionSetClipboardFileRoot,
   sessionSetCommon as bridgeSessionSetCommon,
@@ -82,8 +86,9 @@ import {
   sessionToggleOption as bridgeSessionToggleOption,
   transferNextJobId as bridgeTransferNextJobId,
 } from 'rustdesk-ohrs';
+import { RustDeskMouseSink } from './RustDeskMouseTransport';
 
-export class RustDeskNativeApi {
+export class RustDeskNativeApi implements RustDeskMouseSink {
   backendSummary(): string {
     return bridgeBackendSummary();
   }
@@ -272,6 +277,18 @@ export class RustDeskNativeApi {
     return bridgeSessionGetRgbaSize(sessionId, display);
   }
 
+  sessionGetSoftwarePresentState(sessionId: string, display: number): string {
+    return bridgeSessionGetSoftwarePresentState(sessionId, display);
+  }
+
+  sessionGetFrameRateSnapshot(sessionId: string, display: number): string {
+    return bridgeSessionGetFrameRateSnapshot(sessionId, display);
+  }
+
+  sessionGetNativeDecoderSnapshot(sessionId: string, display: number): string {
+    return bridgeSessionGetNativeDecoderSnapshot(sessionId, display);
+  }
+
   sessionGetToggleOption(sessionId: string, arg: string): boolean {
     return bridgeSessionGetToggleOption(sessionId, arg);
   }
@@ -342,6 +359,11 @@ export class RustDeskNativeApi {
 
   sessionSendMouse(sessionId: string, mouseJson: string): string {
     return bridgeSessionSendMouse(sessionId, mouseJson);
+  }
+
+  sessionSendMouseEvent(sessionId: string, eventKind: number, button: number, x: number, y: number,
+    relativeMarker: number): boolean {
+    return bridgeSessionSendMouseEvent(sessionId, eventKind, button, x, y, relativeMarker);
   }
 
   sessionSetCodecPreference(sessionId: string, codec: string): string {

@@ -1,5 +1,8 @@
 import chatStoreTest from './ChatStore.test';
+import decoderCandidateSnapshotTest from './DecoderCandidateSnapshot.test';
 import downloadRootManagerTest from './DownloadRootManager.test';
+import easyTierReadinessControllerTest from './EasyTierReadinessController.test';
+import mouseTransportTest from './RustDeskMouseTransport.test';
 import pressedButtonStateTest from './RustDeskPressedButtonState.test';
 import rustDeskPeerDirectoryModelTest from './RustDeskPeerDirectoryModel.test';
 import rustDeskImeInputControllerTest from './RustDeskImeInputController.test';
@@ -9,6 +12,8 @@ import remoteSessionTabsControllerTest from './RemoteSessionTabsController.test'
 import sessionDisplayControllerTest from './SessionDisplayController.test';
 import sessionOverlayStateTest from './SessionOverlayState.test';
 import sessionToolbarMetricsTest from './SessionToolbarMetrics.test';
+import softwarePresentStateTest from './SoftwarePresentState.test';
+import frameRateTelemetryTest from './FrameRateTelemetry.test';
 import transferProgressTest from './TransferProgress.test';
 import touchGestureStateTest from './RustDeskTouchGestureState.test';
 import transferManagerTest from './TransferManager.test';
@@ -16,7 +21,10 @@ import viewportModelTest from './RustDeskViewportModel.test';
 
 export default function testsuite(): void {
   chatStoreTest();
+  decoderCandidateSnapshotTest();
   downloadRootManagerTest();
+  easyTierReadinessControllerTest();
+  mouseTransportTest();
   pressedButtonStateTest();
   rustDeskPeerDirectoryModelTest();
   rustDeskImeInputControllerTest();
@@ -26,6 +34,8 @@ export default function testsuite(): void {
   sessionDisplayControllerTest();
   sessionOverlayStateTest();
   sessionToolbarMetricsTest();
+  softwarePresentStateTest();
+  frameRateTelemetryTest();
   transferProgressTest();
   touchGestureStateTest();
   transferManagerTest();

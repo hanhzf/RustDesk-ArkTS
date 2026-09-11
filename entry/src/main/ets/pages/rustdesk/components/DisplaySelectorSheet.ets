@@ -1,4 +1,5 @@
 import { PeerDisplayInfo, ResolutionInfo } from '../RustDeskTypes';
+import { findPeerResolutionIndex, getPeerDisplayModeSize } from '../RustDeskViewportModel';
 
 export interface DisplaySelectorSheetProps {
   displays: PeerDisplayInfo[];
@@ -14,7 +15,7 @@ export interface DisplaySelectorSheetProps {
 
 interface DisplayChoiceOptions {
   label: string;
-  badge: string;
+  badge: ResourceStr;
   selected: boolean;
   onClick: () => void;
 }
@@ -39,11 +40,14 @@ export struct DisplaySelectorSheet {
     return labels;
   }
 
-  private displayBadges(): string[] {
-    const badges: string[] = [];
+  private displayBadges(): ResourceStr[] {
+    const badges: ResourceStr[] = [];
     for (let index = 0; index < this.displays.length; index += 1) {
       const display = this.displays[index];
-      badges.push(`${display.width}×${display.height}`);
+      const mode = getPeerDisplayModeSize(display);
+      badges.push(mode === undefined
+        ? $r('app.string.display_badge_pixels', display.width, display.height)
+        : $r('app.string.display_badge_mode_pixels', mode.width, mode.height, display.width, display.height));
     }
     return badges;
   }
@@ -58,22 +62,9 @@ export struct DisplaySelectorSheet {
   }
 
   private selectedResolutionIndex(): number {
-    for (let index = 0; index < this.resolutions.length; index += 1) {
-      const resolution = this.resolutions[index];
-      if (this.selectedResolution !== undefined
-        && this.selectedResolution.width === resolution.width
-        && this.selectedResolution.height === resolution.height) {
-        return index;
-      }
-      if (this.selectedResolution === undefined
-        && this.currentDisplay >= 0
-        && this.currentDisplay < this.displays.length
-        && this.displays[this.currentDisplay].width === resolution.width
-        && this.displays[this.currentDisplay].height === resolution.height) {
-        return index;
-      }
-    }
-    return 0;
+    const display = this.currentDisplay >= 0 && this.currentDisplay < this.displays.length
+      ? this.displays[this.currentDisplay] : undefined;
+    return findPeerResolutionIndex(display, this.resolutions, this.selectedResolution);
   }
 
   private selectResolutionIndex(index: number): void {
@@ -81,6 +72,10 @@ export struct DisplaySelectorSheet {
       return;
     }
     this.onSelectResolution(this.resolutions[index]);
+  }
+
+  private hasBadge(badge: ResourceStr): boolean {
+    return typeof badge !== 'string' || badge.length > 0;
   }
 
   @Builder
@@ -93,18 +88,18 @@ export struct DisplaySelectorSheet {
           .fontColor(options.selected ? $r('app.color.white') : $r('app.color.neu_text_primary'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis });
-        if (options.badge.length > 0) {
+        if (this.hasBadge(options.badge)) {
           Text(options.badge)
             .fontSize($r('app.float.font_caption'))
             .fontColor(options.selected ? $r('app.color.white') : $r('app.color.neu_text_secondary'))
-            .maxLines(1);
+            .maxLines(2);
         }
       }
       .width('100%')
       .alignItems(HorizontalAlign.Center);
     }
     .width(132)
-    .height(options.badge.length > 0 ? 52 : 44)
+    .height(this.hasBadge(options.badge) ? 68 : 44)
     .padding({ left: $r('app.float.space_8'), right: $r('app.float.space_8') })
     .backgroundColor(options.selected ? $r('app.color.brand_primary') : $r('app.color.mica_control'))
     .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN, {

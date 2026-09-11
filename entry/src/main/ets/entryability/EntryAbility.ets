@@ -23,6 +23,7 @@ import {
   StatusBarKeepAliveService,
 } from '../services/desktop/StatusBarKeepAliveService';
 import { controlledHostCoordinator } from '../services/controlled/ControlledHostCoordinator';
+import { NativeBufferDiagnosticService } from '../services/NativeBufferDiagnosticService';
 
 const DOMAIN = 0xFF00;
 const TAG = 'RustDeskHMOS';
@@ -34,6 +35,7 @@ interface PrivacyStateChangedPayload {
 }
 
 export default class EntryAbility extends UIAbility {
+  private nativeBufferDiagnosticService: NativeBufferDiagnosticService = new NativeBufferDiagnosticService();
   private dataTransferBackgroundService: DataTransferBackgroundService | undefined = undefined;
   private dataTransferBinding: DataTransferBackgroundBinding | undefined = undefined;
   private easyTierApiService: EasyTierApiService | undefined = undefined;
@@ -81,6 +83,7 @@ export default class EntryAbility extends UIAbility {
     this.context.eventHub.on(REMOTE_SESSION_CONTINUE_STATE_EVENT, this.onRemoteSessionContinueState);
     this.setContinueState(false);
     this.handleIncomingWant(want, launchParam);
+    this.nativeBufferDiagnosticService.handleWant(want);
   }
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -91,6 +94,7 @@ export default class EntryAbility extends UIAbility {
       void this.easyTierApiService.startSnapshotObserver();
     }
     this.handleIncomingWant(want, launchParam);
+    this.nativeBufferDiagnosticService.handleWant(want);
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -143,6 +147,7 @@ export default class EntryAbility extends UIAbility {
   onDestroy(): void {
     hilog.info(DOMAIN, TAG, 'Ability onDestroy');
     this.abilityDestroyed = true;
+    this.nativeBufferDiagnosticService.destroy();
     LuminousMotionLight.suspend();
     LuminousMotionLight.disableSensorSubscription();
     this.unsubscribePrivacyStateChanged();
