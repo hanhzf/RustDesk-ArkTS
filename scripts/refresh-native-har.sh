@@ -2,10 +2,10 @@
 set -euo pipefail
 
 app_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-native_root="${NATIVE_ROOT:-$app_root/../rustdesk_native_har}"
+enhanced_root="${RUSTDESK_ENHANCED_ROOT:-$app_root/../RustDesk-Enhanced}"
 ohos_cli_home="${OHOS_CLI_HOME:-/home/frankhan/command-line-tools}"
 ohpm_bin="${OHPM:-$ohos_cli_home/bin/ohpm}"
-source_har="${NATIVE_HAR_PATH:-$native_root/package.har}"
+source_har="${NATIVE_HAR_PATH:-$enhanced_root/dist/ohos-har/package.har}"
 target_har="$app_root/rustdesk-ohrs.har"
 
 if [[ ! -f "$source_har" ]]; then
@@ -13,8 +13,8 @@ if [[ ! -f "$source_har" ]]; then
 Missing native HAR: $source_har
 
 Build it first:
-  cd "$native_root"
-  scripts/build-har.sh
+  cd "$enhanced_root"
+  scripts/ohos/build-har.sh
 EOF
   exit 1
 fi
