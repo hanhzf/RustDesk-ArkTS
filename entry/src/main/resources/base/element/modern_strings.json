@@ -5,6 +5,7 @@
     { "name": "modern_consent", "value": "我同意连接已获授权的远端。接收不录屏、不采集传感器、不保存口令；本机分享只在另行开启、逐次本地确认及系统授权后采集屏幕。取消同意即请求停止。" },
     { "name": "modern_strict_identity", "value": "严格验证对端公钥（失败不降级）" },
     { "name": "modern_rendezvous_mode", "value": "通过已配置RustDesk ID服务器连接（服务器签名身份，失败不降级）" },
+    { "name": "modern_high_fps", "value": "高帧率模式：关闭时按60 FPS低时延传输；仅在系统已启用高刷时开启120 FPS" },
     { "name": "modern_peer_target_id", "value": "远端RustDesk ID" },
     { "name": "modern_peer_id", "value": "带外确认的对端ID" },
     { "name": "modern_peer_key", "value": "对端Ed25519公钥 Base64（不是hbbs服务器密钥）" },

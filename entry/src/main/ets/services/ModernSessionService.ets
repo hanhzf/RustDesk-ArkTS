@@ -25,30 +25,42 @@ class ModernSessionService {
   private id: string = '';
   private closePromise: Promise<void> | undefined = undefined;
 
-  connect(filesDir: string, surfaceId: string, address: string, password: string): void {
+  private normalizedFps(requestedFps: number): number {
+    if (!Number.isFinite(requestedFps)) {
+      return 60;
+    }
+    return Math.max(1, Math.min(120, Math.round(requestedFps)));
+  }
+
+  connect(filesDir: string, surfaceId: string, address: string, password: string,
+    requestedFps: number): void {
     if (this.id.length > 0 || this.closePromise !== undefined) {
       throw new Error('A session still owns the Surface');
     }
     const localId: string = engineInitialize(filesDir);
-    this.id = engineConnect(surfaceId, address.trim(), '', localId, 'RustDesk', password, 120);
+    this.id = engineConnect(surfaceId, address.trim(), '', localId, 'RustDesk', password,
+      this.normalizedFps(requestedFps));
   }
 
   connectVerified(filesDir: string, surfaceId: string, address: string, password: string,
-    expectedPeerId: string, peerSigningKeyBase64: string): void {
+    requestedFps: number, expectedPeerId: string, peerSigningKeyBase64: string): void {
     if (this.id.length > 0 || this.closePromise !== undefined) {
       throw new Error('A session still owns the Surface');
     }
     const localId: string = engineInitialize(filesDir);
-    this.id = engineConnectVerified(surfaceId, address.trim(), '', localId, 'RustDesk', password, 120,
+    this.id = engineConnectVerified(surfaceId, address.trim(), '', localId, 'RustDesk', password,
+      this.normalizedFps(requestedFps),
       expectedPeerId.trim(), peerSigningKeyBase64.trim());
   }
 
-  connectId(filesDir: string, surfaceId: string, peerId: string, password: string): void {
+  connectId(filesDir: string, surfaceId: string, peerId: string, password: string,
+    requestedFps: number): void {
     if (this.id.length > 0 || this.closePromise !== undefined) {
       throw new Error('A session still owns the Surface');
     }
     const localId: string = engineInitialize(filesDir);
-    this.id = engineConnectId(surfaceId, peerId.trim(), localId, 'RustDesk', password, 120);
+    this.id = engineConnectId(surfaceId, peerId.trim(), localId, 'RustDesk', password,
+      this.normalizedFps(requestedFps));
   }
 
   hasSession(): boolean {

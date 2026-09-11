@@ -26,6 +26,7 @@ struct ModernDesk {
   @State private useRendezvous: boolean = true;
   @State private strictIdentity: boolean = true;
   @State private legacyConfirmed: boolean = false;
+  @State private highFps: boolean = false;
   @State private expectedPeerId: string = '';
   @State private peerSigningKey: string = '';
   @State private encrypted: boolean = false;
@@ -112,13 +113,14 @@ struct ModernDesk {
       this.encrypted = false;
       this.peerVerified = false;
       this.route = '';
+      const requestedFps: number = this.highFps ? 120 : 60;
       if (this.useRendezvous) {
-        modernSession.connectId(context.filesDir, this.surfaceId, this.target, this.password);
+        modernSession.connectId(context.filesDir, this.surfaceId, this.target, this.password, requestedFps);
       } else if (this.strictIdentity) {
         modernSession.connectVerified(context.filesDir, this.surfaceId, this.target, this.password,
-          this.expectedPeerId, this.peerSigningKey);
+          requestedFps, this.expectedPeerId, this.peerSigningKey);
       } else {
-        modernSession.connect(context.filesDir, this.surfaceId, this.target, this.password);
+        modernSession.connect(context.filesDir, this.surfaceId, this.target, this.password, requestedFps);
       }
       this.active = true;
       this.closeFailed = false;
@@ -292,6 +294,11 @@ struct ModernDesk {
         Button($r('app.string.modern_host_panel')).onClick(() => this.showHost = !this.showHost)
           .id('modern_host_panel')
       }
+      Row({ space: 8 }) {
+        Checkbox({ name: 'highFps' }).select(this.highFps).enabled(!this.active)
+          .onChange((value: boolean) => this.highFps = value).id('modern_high_fps')
+        Text($r('app.string.modern_high_fps')).fontSize(12).layoutWeight(1)
+      }
       if (!this.useRendezvous) {
         Row({ space: 8 }) {
           Checkbox({ name: 'strictIdentity' }).select(this.strictIdentity).enabled(!this.active)
@@ -338,7 +345,8 @@ struct ModernDesk {
         Button($r('app.string.modern_capabilities')).enabled(this.consent && !this.querying)
           .onClick(() => this.queryCapabilities()).id('modern_capabilities')
       }
-      Text(`${this.phase}  ${this.route}  ${this.codec}  ${this.sourceWidth} × ${this.sourceHeight}`)
+      Text(`${this.phase}  ${this.route}  ${this.codec}  ${this.sourceWidth} × ${this.sourceHeight}  ` +
+        `${this.highFps ? 120 : 60} FPS`)
         .fontSize(12).id('modern_state')
       Text(!this.active ? $r('app.string.modern_security_none') :
         (this.peerVerified && this.encrypted ? $r('app.string.modern_security_verified') :
