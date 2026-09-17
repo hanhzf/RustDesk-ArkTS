@@ -6,7 +6,8 @@
   "author": "",
   "license": "",
   "dependencies": {
-    "luminous_neo": "1.0.2"
+    "luminous_neo": "file:../luminous_neo",
+    "rustdesk-ohrs": "file:../rustdesk-ohrs.har"
   },
   "devDependencies": {},
   "dynamicDependencies": {}

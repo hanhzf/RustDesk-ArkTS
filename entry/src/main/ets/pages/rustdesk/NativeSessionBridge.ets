@@ -43,6 +43,7 @@ export interface NativeSessionBridge {
   addSession(sessionId: string, target: string, options: SessionStartOptions): ActionResponse;
   startSession(sessionId: string): ActionResponse;
   setViewOnly(sessionId: string, enabled: boolean): ActionResponse;
+  setPrivacyMode(sessionId: string, implKey: string, enabled: boolean): ActionResponse;
   login(sessionId: string, password: string, remember?: boolean): ActionResponse;
   setCommon(sessionId: string, key: string, value: string): void;
   closeSession(sessionId: string): ActionResponse;
@@ -158,6 +159,10 @@ export class RustDeskNativeSessionBridge implements NativeSessionBridge {
 
   setViewOnly(sessionId: string, enabled: boolean): ActionResponse {
     return this.parseNativeResponse(() => native.sessionSetViewOnly(sessionId, enabled));
+  }
+
+  setPrivacyMode(sessionId: string, implKey: string, enabled: boolean): ActionResponse {
+    return this.parseNativeResponse(() => native.sessionSetPrivacyMode(sessionId, implKey, enabled));
   }
 
   login(sessionId: string, password: string, remember: boolean = false): ActionResponse {

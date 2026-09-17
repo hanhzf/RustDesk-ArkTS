@@ -194,6 +194,10 @@ const ANDROID_NAVIGATION_BOTTOM_OFFSET = 80;
 const ANDROID_NAVIGATION_EDGE_MARGIN = 12;
 const ANDROID_RECENT_PRESS_DURATION_MS = 500;
 const BACKGROUND_SESSION_POLL_INTERVAL_MS = 250;
+const PRIVACY_MODE_IMPL_MACOS = 'privacy_mode_impl_macos';
+const PRIVACY_MODE_CONFIRM_ATTEMPTS = 15;
+const PRIVACY_MODE_CONFIRM_INTERVAL_MS = 120;
+const PRIVACY_MODE_EXIT_ATTEMPTS = 9;
 const NEW_REMOTE_SESSION_SWITCH_TARGET = '__new_remote_session__';
 
 type PrimarySessionKind = 'remote_control' | 'view_only' | 'view_camera';
@@ -525,6 +529,9 @@ struct RustDeskIndex {
     rendererActive: false,
     errorText: '',
   };
+  @Local privacyModeEnabled: boolean = false;
+  @Local privacyModeBusy: boolean = false;
+  private privacyModeRequestId: number = 0;
   private remoteAudioPollTimer: number = -1;
   private remoteAudioDefaultApplied: boolean = false;
   private transferRoot: DownloadRoot | undefined = undefined;
@@ -779,8 +786,121 @@ struct RustDeskIndex {
   }
 
   private isPeerMacOS(): boolean {
-    const normalized = this.peerPlatform.toLowerCase().replace(/[\s_-]/g, '');
+    return this.isMacPlatform(this.peerPlatform);
+  }
+
+  private isMacPlatform(platform: string): boolean {
+    const normalized = platform.toLowerCase().replace(/[\s_-]/g, '');
     return normalized === 'macos' || normalized === 'macosx' || normalized === 'darwin' || normalized === 'mac';
+  }
+
+  private privacyModeAvailable(): boolean {
+    return this.isRemoteControlSessionActive()
+      && this.sessionPhase === 'connected'
+      && this.isPeerMacOS()
+      && this.isPeerVersionAtLeast(1, 4, 6);
+  }
+
+  private privacyModeImplKey(sessionId: string): string {
+    const tab = this.remoteSessionTabsController.get(sessionId);
+    const platform = tab?.peerInfo?.platform ?? (sessionId === this.activeSessionId ? this.peerPlatform : '');
+    return this.isMacPlatform(String(platform)) ? PRIVACY_MODE_IMPL_MACOS : '';
+  }
+
+  private applyPrivacyModeState(sessionId: string, enabled: boolean): void {
+    const tab = this.remoteSessionTabsController.get(sessionId);
+    if (tab !== undefined) {
+      tab.privacyModeEnabled = enabled;
+    }
+    if (sessionId === this.activeSessionId) {
+      this.privacyModeEnabled = enabled;
+    }
+    this.syncRemoteSessionTabs();
+  }
+
+  private syncPrivacyModeState(sessionId: string): boolean {
+    if (sessionId.length === 0) {
+      return false;
+    }
+    const enabled = this.nativeSessionBridge.getToggleOption(sessionId, 'privacy-mode');
+    this.applyPrivacyModeState(sessionId, enabled);
+    return enabled;
+  }
+
+  private async setPrivacyModeEnabled(enabled: boolean): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!this.privacyModeAvailable() || this.privacyModeBusy || sessionId.length === 0) {
+      return;
+    }
+    const implKey = this.privacyModeImplKey(sessionId);
+    if (implKey.length === 0) {
+      this.errorText = '当前远端不支持隐私屏幕';
+      return;
+    }
+    const requestId = ++this.privacyModeRequestId;
+    this.privacyModeBusy = true;
+    const response = this.nativeSessionBridge.setPrivacyMode(sessionId, implKey, enabled);
+    if (!response.ok) {
+      this.privacyModeBusy = false;
+      this.errorText = response.message ?? '隐私屏幕切换失败';
+      return;
+    }
+    for (let attempt = 0; attempt < PRIVACY_MODE_CONFIRM_ATTEMPTS; attempt += 1) {
+      await new Promise<void>((resolve: () => void): void => {
+        setTimeout(resolve, PRIVACY_MODE_CONFIRM_INTERVAL_MS);
+      });
+      if (requestId !== this.privacyModeRequestId || sessionId !== this.activeSessionId) {
+        return;
+      }
+      const current = this.syncPrivacyModeState(sessionId);
+      if (current === enabled) {
+        this.privacyModeBusy = false;
+        this.sessionMessage = enabled ? '隐私屏幕已开启' : '隐私屏幕已关闭';
+        this.errorText = '';
+        return;
+      }
+    }
+    this.privacyModeBusy = false;
+    this.errorText = enabled ? '远端未确认开启隐私屏幕' : '远端未确认关闭隐私屏幕';
+  }
+
+  private async exitPrivacyModeBeforeClose(sessionId: string): Promise<void> {
+    if (sessionId.length === 0) {
+      return;
+    }
+    if (sessionId === this.activeSessionId && this.privacyModeBusy) {
+      for (let attempt = 0; attempt < PRIVACY_MODE_CONFIRM_ATTEMPTS && this.privacyModeBusy; attempt += 1) {
+        await new Promise<void>((resolve: () => void): void => {
+          setTimeout(resolve, PRIVACY_MODE_CONFIRM_INTERVAL_MS);
+        });
+      }
+    }
+    if (!this.nativeSessionBridge.getToggleOption(sessionId, 'privacy-mode')) {
+      return;
+    }
+    const implKey = this.privacyModeImplKey(sessionId);
+    if (implKey.length === 0) {
+      return;
+    }
+    this.privacyModeRequestId += 1;
+    if (sessionId === this.activeSessionId) {
+      this.privacyModeBusy = true;
+    }
+    const response = this.nativeSessionBridge.setPrivacyMode(sessionId, implKey, false);
+    if (response.ok) {
+      for (let attempt = 0; attempt < PRIVACY_MODE_EXIT_ATTEMPTS; attempt += 1) {
+        await new Promise<void>((resolve: () => void): void => {
+          setTimeout(resolve, PRIVACY_MODE_CONFIRM_INTERVAL_MS);
+        });
+        if (!this.nativeSessionBridge.getToggleOption(sessionId, 'privacy-mode')) {
+          break;
+        }
+      }
+    }
+    this.applyPrivacyModeState(sessionId, false);
+    if (sessionId === this.activeSessionId) {
+      this.privacyModeBusy = false;
+    }
   }
 
   private isPeerAndroid(): boolean {
@@ -2683,6 +2803,7 @@ struct RustDeskIndex {
       tab.paused = true;
       tab.audioMuted = this.remoteAudioState.muted;
       tab.audioPreferenceCaptured = this.remoteAudioState.available;
+      tab.privacyModeEnabled = this.privacyModeEnabled;
       tab.uiStateCaptured = true;
       tab.touchMode = this.touchMode;
       tab.relativeMouseMode = this.relativeMouseMode;
@@ -3237,6 +3358,7 @@ struct RustDeskIndex {
       this.handleSessionEvent(event);
     }
     if (nextTab.kind === 'remote_control') {
+      this.syncPrivacyModeState(nextTab.sessionId);
       this.refreshRemoteAudioState();
       if (nextTab.audioPreferenceCaptured) {
         this.nativeSessionBridge.setRemoteAudioMuted(nextTab.sessionId, nextTab.audioMuted);
@@ -3342,6 +3464,7 @@ struct RustDeskIndex {
     }
     this.sessionCloseInFlight = true;
     try {
+      await this.exitPrivacyModeBeforeClose(sessionId);
       await this.clipboardController?.cleanupIncomingRootForClosedSession(sessionId);
       try {
         this.nativeSessionBridge.closeSession(sessionId);
@@ -3377,6 +3500,7 @@ struct RustDeskIndex {
         this.connectionUiMessage = '';
       }
       const sessionId = this.activeSessionId;
+      await this.exitPrivacyModeBeforeClose(sessionId);
       this.rejectPendingInsecureConnection();
       hilog.info(DOMAIN, TAG, 'closeSession sessionId=%{public}s reason=%{public}s', sessionId, reason ?? '');
       this.hideSystemIme(false);
@@ -3560,6 +3684,9 @@ struct RustDeskIndex {
     this.customFpsDraft = this.activeSessionDefaults.customFps;
     this.remoteAudioState = this.unavailableRemoteAudioState();
     this.remoteAudioDefaultApplied = false;
+    this.privacyModeRequestId += 1;
+    this.privacyModeEnabled = false;
+    this.privacyModeBusy = false;
     this.isMiniBarExpanded = this.activeSessionDefaults.toolbarExpanded;
     this.initialDisplayCommandIssued = false;
     this.pendingDisplayIndex = -1;
@@ -7054,6 +7181,10 @@ struct RustDeskIndex {
         || event.name === 'cursor_position' || event.name === 'update_quality_status') {
         continue;
       }
+      if (event.name === 'update_privacy_mode') {
+        tab.privacyModeEnabled = this.nativeSessionBridge.getToggleOption(tab.sessionId, 'privacy-mode');
+        continue;
+      }
       if (event.name === 'close') {
         this.remoteSessionTabsController.markPhase(tab.sessionId, 'closed', '远端连接已结束');
         this.remoteSessionTabsController.enqueue(tab.sessionId, event, true);
@@ -7191,6 +7322,11 @@ struct RustDeskIndex {
       if (event.name === 'peer_info') {
         this.refreshDirectorySnapshot();
       }
+      this.syncPrivacyModeState(this.activeSessionId);
+      return;
+    }
+    if (event.name === 'update_privacy_mode') {
+      this.syncPrivacyModeState(this.activeSessionId);
       return;
     }
     if (event.name === 'switch_display') {
@@ -7918,6 +8054,9 @@ struct RustDeskIndex {
             systemImeActive: this.systemImeActive,
             audioAvailable: this.remoteAudioState.available,
             audioMuted: this.remoteAudioState.muted,
+            privacyModeAvailable: this.privacyModeAvailable(),
+            privacyModeEnabled: this.privacyModeEnabled,
+            privacyModeBusy: this.privacyModeBusy,
             wideLayout: this.activeSessionKind === 'remote_control' && this.previewViewWidth >= 700,
             transformSummary: this.previewTransformSummary(),
             canResetTransform: this.hasPreviewViewTransform(),
@@ -7931,6 +8070,7 @@ struct RustDeskIndex {
             onResetTransform: () => this.resetPreviewViewTransform(),
             onOpenChat: () => this.openChatDrawer(),
             onAudioChange: (enabled: boolean) => this.setRemoteAudioEnabled(enabled),
+            onPrivacyModeChange: (enabled: boolean) => void this.setPrivacyModeEnabled(enabled),
             onOpenDisplay: () => this.openDisplaySheet(),
             onOpenQuality: () => this.openQualitySheet(),
             onRefreshDisplay: () => this.requestVideoRefresh(),

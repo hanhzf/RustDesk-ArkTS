@@ -1,0 +1,11 @@
+{
+  "name": "luminous_neo",
+  "version": "1.0.2",
+  "description": "Local compatibility components for the RustDesk HarmonyOS client.",
+  "main": "Index.ets",
+  "author": "",
+  "license": "",
+  "dependencies": {},
+  "devDependencies": {},
+  "dynamicDependencies": {}
+}

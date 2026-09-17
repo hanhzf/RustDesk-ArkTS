@@ -23,6 +23,7 @@ export class RemoteSessionTab {
   unreadCount: number = 0;
   audioMuted: boolean = true;
   audioPreferenceCaptured: boolean = false;
+  privacyModeEnabled: boolean = false;
   uiStateCaptured: boolean = false;
   touchMode: boolean = true;
   relativeMouseMode: boolean = false;
