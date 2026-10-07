@@ -195,6 +195,7 @@ const PRIVACY_MODE_CONFIRM_ATTEMPTS = 15;
 const PRIVACY_MODE_CONFIRM_INTERVAL_MS = 120;
 const PRIVACY_MODE_EXIT_ATTEMPTS = 9;
 const NEW_REMOTE_SESSION_SWITCH_TARGET = '__new_remote_session__';
+const SESSION_ESCAPE_KEY_CODE = 2070;
 
 type PrimarySessionKind = 'remote_control' | 'view_only' | 'view_camera';
 type PasswordSessionKind = 'primary' | 'file_transfer';
@@ -487,6 +488,7 @@ struct RustDeskIndex {
   private androidNavigationCollapsedY: number = -1;
   @Local remoteKeyboardPermissionAllowed: boolean = true;
   private overlayState: SessionOverlayState = new SessionOverlayState();
+  private sessionEscapeKeyHandled: boolean = false;
   @Local activeOverlayPanel: SessionOverlayPanel = 'home';
   @Local chatDraft: string = '';
   @Local chatRevision: number = 0;
@@ -3643,6 +3645,7 @@ struct RustDeskIndex {
     this.remoteCursorEventLogCounter = 0;
     this.chatDraft = '';
     this.overlayState.close();
+    this.sessionEscapeKeyHandled = false;
     this.activeOverlayPanel = 'home';
     this.selectedQualityPreset = this.qualityPresetFor(this.activeSessionDefaults);
     this.customQualityDraft = this.activeSessionDefaults.customQuality;
@@ -4422,6 +4425,11 @@ struct RustDeskIndex {
       for (let index = 0; index < events.length; index++) {
         const event = events[index];
         if (event.type === 'key') {
+          const keyType = event.action === 1 ? KeyType.Down : KeyType.Up;
+          if ((event.action === 1 || event.action === 0 || event.action === 2)
+            && this.handleSessionEscapeKey(event.keyCode, keyType)) {
+            continue;
+          }
           this.getInputController().handleInterceptedKeyEvent(event.keyCode, event.action);
         }
       }
@@ -6478,6 +6486,9 @@ struct RustDeskIndex {
   }
 
   private handlePreviewKeyEvent(event: KeyEvent): boolean {
+    if (this.handleSessionEscapeKeyEvent(event)) {
+      return true;
+    }
     if (!this.isRemoteControlSessionActive()) {
       return false;
     }
@@ -6487,11 +6498,58 @@ struct RustDeskIndex {
   }
 
   private handlePreviewRootKeyEvent(event: KeyEvent): boolean {
+    if (this.handleSessionEscapeKeyEvent(event)) {
+      return true;
+    }
     if (!this.isRemoteControlSessionActive()) {
       return false;
     }
     this.logRelativeDebug('keyboard_root_event', `keyCode=${event.keyCode} type=${String(event.type)} keyText=${String(event.keyText ?? '')} unicode=${String(event.unicode ?? '')}`);
     return this.getInputController().handleKeyEvent(event);
+  }
+
+  private handleSessionEscapeKeyEvent(event: KeyEvent): boolean {
+    if (!this.handleSessionEscapeKey(event.keyCode, event.type)) {
+      return false;
+    }
+    event.stopPropagation();
+    return true;
+  }
+
+  private handleSessionEscapeKey(keyCode: number, type: KeyType): boolean {
+    if (keyCode !== SESSION_ESCAPE_KEY_CODE) {
+      return false;
+    }
+    if (type === KeyType.Up) {
+      if (!this.sessionEscapeKeyHandled) {
+        return false;
+      }
+      this.sessionEscapeKeyHandled = false;
+    } else if (type === KeyType.Down) {
+      if (!this.sessionEscapeKeyHandled) {
+        if (this.isMiniBarExpanded || this.overlayState.getActivePanel() !== 'home') {
+          this.collapseSessionToolbar();
+          this.logRelativeDebug('keyboard_escape', 'local=collapse_toolbar');
+        } else if (this.sessionWindowFullscreen) {
+          this.toggleSessionWindowFullscreen();
+          this.logRelativeDebug('keyboard_escape', 'local=exit_fullscreen');
+        } else {
+          return false;
+        }
+        this.sessionEscapeKeyHandled = true;
+      }
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  private collapseSessionToolbar(): void {
+    this.closeOverlayPanel();
+    this.getUIContext()?.animateTo({ duration: 300, curve: Curve.FastOutSlowIn }, () => {
+      this.isMiniBarExpanded = false;
+    });
+    setTimeout(() => this.requestPreviewInputFocus(), 320);
   }
 
   private requestPreviewInputFocus(): void {
@@ -7952,11 +8010,7 @@ struct RustDeskIndex {
               this.setAndroidNavigationExpanded(expanded);
             },
             onDisconnect: () => this.closeSession('已手动断开连接'),
-            onCollapse: () => {
-              this.getUIContext()?.animateTo({ duration: 300, curve: Curve.FastOutSlowIn }, () => {
-                this.isMiniBarExpanded = false;
-              });
-            },
+            onCollapse: () => this.collapseSessionToolbar(),
             onMinimizeWindow: () => this.minimizeSessionWindow(),
             onToggleWindowFullscreen: () => this.toggleSessionWindowFullscreen(),
             onSelectSession: (sessionId: string) => void this.switchRemoteSessionTab(sessionId),
@@ -8949,7 +9003,8 @@ struct RustDeskIndex {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.black'));
+    .backgroundColor($r('app.color.black'))
+    .onKeyEvent((event: KeyEvent) => this.handleSessionEscapeKeyEvent(event));
   }
 
   @Builder
