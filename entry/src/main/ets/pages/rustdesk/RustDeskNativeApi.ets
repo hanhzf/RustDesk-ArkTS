@@ -40,6 +40,9 @@ import {
   sessionCancelJob as bridgeSessionCancelJob,
   sessionChangeResolution as bridgeSessionChangeResolution,
   sessionClose as bridgeSessionClose,
+  sessionRequestVoiceCall as bridgeSessionRequestVoiceCall,
+  sessionCloseVoiceCall as bridgeSessionCloseVoiceCall,
+  sessionSendVoicePcm as bridgeSessionSendVoicePcm,
   sessionEnterOrLeave as bridgeSessionEnterOrLeave,
   sessionGetImageQuality as bridgeSessionGetImageQuality,
   sessionGetConnToken as bridgeSessionGetConnToken,
@@ -247,6 +250,18 @@ export class RustDeskNativeApi {
 
   sessionClose(sessionId: string): string {
     return bridgeSessionClose(sessionId);
+  }
+
+  sessionRequestVoiceCall(sessionId: string): string {
+    return bridgeSessionRequestVoiceCall(sessionId);
+  }
+
+  sessionCloseVoiceCall(sessionId: string): string {
+    return bridgeSessionCloseVoiceCall(sessionId);
+  }
+
+  sessionSendVoicePcm(sessionId: string, pcm: Uint8Array): boolean {
+    return bridgeSessionSendVoicePcm(sessionId, pcm);
   }
 
   sessionEnterOrLeave(sessionId: string, enter: boolean): string {

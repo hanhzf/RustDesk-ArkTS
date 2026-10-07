@@ -25,6 +25,10 @@
       "value": "用于在远程控制会话中同步文本剪贴板。"
     },
     {
+      "name": "microphone_permission_reason",
+      "value": "仅在你开启远程语音输入时采集麦克风，并传送到当前连接的电脑。"
+    },
+    {
       "name": "remote_android_navigation_back",
       "value": "返回"
     },

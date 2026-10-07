@@ -36,6 +36,8 @@ export interface SessionToolbarProps {
   systemImeActive: boolean;
   audioAvailable: boolean;
   audioMuted: boolean;
+  voiceInputAvailable: boolean;
+  voiceInputState: string;
   privacyModeAvailable: boolean;
   privacyModeEnabled: boolean;
   privacyModeBusy: boolean;
@@ -58,6 +60,7 @@ export interface SessionToolbarProps {
   onToggleSystemIme: () => void;
   onToggleAndroidNavigation: () => void;
   onAudioChange: (enabled: boolean) => void;
+  onVoiceInputChange: (enabled: boolean) => void;
   onPrivacyModeChange: (enabled: boolean) => void;
   onDisconnect: () => void;
   onCollapse: () => void;
@@ -100,6 +103,8 @@ export struct SessionToolbar {
   @Param systemImeActive: boolean = false;
   @Param audioAvailable: boolean = false;
   @Param audioMuted: boolean = false;
+  @Param voiceInputAvailable: boolean = false;
+  @Param voiceInputState: string = 'off';
   @Param privacyModeAvailable: boolean = false;
   @Param privacyModeEnabled: boolean = false;
   @Param privacyModeBusy: boolean = false;
@@ -122,6 +127,7 @@ export struct SessionToolbar {
   @Event onToggleSystemIme: () => void = () => {};
   @Event onToggleAndroidNavigation: () => void = () => {};
   @Event onAudioChange: (enabled: boolean) => void = (_enabled: boolean) => {};
+  @Event onVoiceInputChange: (enabled: boolean) => void = (_enabled: boolean) => {};
   @Event onPrivacyModeChange: (enabled: boolean) => void = (_enabled: boolean) => {};
   @Event onDisconnect: () => void = () => {};
   @Event onCollapse: () => void = () => {};
@@ -945,6 +951,15 @@ export struct SessionToolbar {
       if (this.activeOverlayPanel === 'home') {
         Column({ space: $r('app.float.space_8') }) {
           this.FunctionHome();
+
+          if (this.voiceInputAvailable) {
+            Button(this.voiceInputState === 'on' ? '停止语音输入' :
+              this.voiceInputState === 'waiting' ? '取消语音输入（等待 Mac 接听）' : '语音输入')
+              .width('100%')
+              .onClick((): void => {
+                this.onVoiceInputChange(this.voiceInputState === 'off');
+              });
+          }
 
           if (this.androidNavigationAvailable) {
             Row() {

@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="390" viewBox="0 0 1280 390" role="img" aria-labelledby="title desc">
+  <title id="title">鸿蒙 RustDesk 语音输入到 Mac 豆包的端到端链路</title>
+  <desc id="desc">鸿蒙端点击语音输入并采集麦克风，通过 RustDesk HAR 和 Core 编码传输；Mac 对已认证且在设备 ID 名单内的会话自动接听，将收到的声音播放到 BlackHole 2ch，豆包从 BlackHole 2ch 录音并识别文字。</desc>
+  <defs>
+    <style>
+      text { font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #172033; }
+      .title { font-size: 28px; font-weight: 700; }
+      .subtitle { font-size: 16px; fill: #53657d; }
+      .card-title { font-size: 21px; font-weight: 700; }
+      .card-body { font-size: 16px; fill: #42536b; }
+      .small { font-size: 14px; fill: #53657d; }
+      .link { fill: none; stroke: #64748b; stroke-width: 3; }
+    </style>
+  </defs>
+  <rect width="1280" height="390" rx="20" fill="#f7f9fc"/>
+  <text x="40" y="48" class="title">鸿蒙说话，Mac 豆包识别</text>
+  <text x="40" y="78" class="subtitle">一次点击开启单向语音；Mac 自动接听，无需到被控电脑前操作</text>
+
+  <rect x="40" y="113" width="214" height="178" rx="16" fill="#e8f5ff" stroke="#b4dcfa" stroke-width="2"/>
+  <text x="60" y="153" class="card-title">鸿蒙端</text>
+  <text x="60" y="185" class="card-body">点击「语音输入」</text>
+  <text x="60" y="214" class="card-body">授权并采集麦克风</text>
+  <text x="60" y="265" class="small">RustDesk-ArkTS</text>
+
+  <path d="M 257 202 H 278" class="link"/><path d="M 278 195 L 289 202 L 278 209 Z" fill="#64748b"/>
+  <rect x="292" y="113" width="214" height="178" rx="16" fill="#eef0ff" stroke="#c6cbfa" stroke-width="2"/>
+  <text x="312" y="153" class="card-title">传输层</text>
+  <text x="312" y="185" class="card-body">HAR 桥接 → Core</text>
+  <text x="312" y="214" class="card-body">Opus 编码并发送</text>
+  <text x="312" y="265" class="small">RustDeskHar / 鸿蒙 Core</text>
+
+  <path d="M 509 202 H 530" class="link"/><path d="M 530 195 L 541 202 L 530 209 Z" fill="#64748b"/>
+  <rect x="544" y="113" width="214" height="178" rx="16" fill="#e7f7ef" stroke="#afe1c5" stroke-width="2"/>
+  <text x="564" y="153" class="card-title">Mac 被控端</text>
+  <text x="564" y="185" class="card-body">已认证 + 设备 ID 名单</text>
+  <text x="564" y="214" class="card-body">自动接听</text>
+  <text x="564" y="238" class="card-body">不发送 Mac 麦克风</text>
+  <text x="564" y="265" class="small">rustdesk-mac</text>
+
+  <path d="M 761 202 H 782" class="link"/><path d="M 782 195 L 793 202 L 782 209 Z" fill="#64748b"/>
+  <rect x="796" y="113" width="194" height="178" rx="16" fill="#fff5e7" stroke="#f5d39b" stroke-width="2"/>
+  <text x="816" y="153" class="card-title">BlackHole 2ch</text>
+  <text x="816" y="185" class="card-body">Mac 系统音频输出</text>
+  <text x="816" y="214" class="card-body">虚拟音频设备</text>
+  <text x="816" y="265" class="small">不是 Mac 扬声器</text>
+
+  <path d="M 993 202 H 1014" class="link"/><path d="M 1014 195 L 1025 202 L 1014 209 Z" fill="#64748b"/>
+  <rect x="1028" y="113" width="212" height="178" rx="16" fill="#fceef7" stroke="#efc3df" stroke-width="2"/>
+  <text x="1048" y="153" class="card-title">豆包输入法</text>
+  <text x="1048" y="185" class="card-body">输入选 BlackHole 2ch</text>
+  <text x="1048" y="214" class="card-body">识别为文字</text>
+  <text x="1048" y="265" class="small">本次已完成实机验证</text>
+
+  <rect x="40" y="316" width="1200" height="46" rx="12" fill="#e9edf4"/>
+  <text x="60" y="345" class="subtitle">控制边界：再点按钮、切换会话、离开页面或断开连接 → 鸿蒙端停止采集</text>
+</svg>

@@ -75,6 +75,7 @@ import {
   RustDeskClipboardController,
   RustDeskRemoteClipboardPayload,
 } from './rustdesk/RustDeskClipboardController';
+import { RemoteVoiceInputController } from './rustdesk/RemoteVoiceInputController';
 import {
   RustDeskCoordinateSpace,
   RustDeskFlutterKeyPayload,
@@ -251,6 +252,7 @@ struct RustDeskIndex {
   private imeInputController: RustDeskImeInputController = new RustDeskImeInputController();
   private systemImeTextController: TextInputController = new TextInputController();
   private clipboardController?: RustDeskClipboardController;
+  private voiceInputController?: RemoteVoiceInputController;
   private clipboardFileRootSessionId: string = '';
   private preferences?: RustDeskPreferences;
   private connectScroller: Scroller = new Scroller();
@@ -511,6 +513,7 @@ struct RustDeskIndex {
     rendererActive: false,
     errorText: '',
   };
+  @Local voiceInputState: string = 'off';
   @Local privacyModeEnabled: boolean = false;
   @Local privacyModeBusy: boolean = false;
   private privacyModeRequestId: number = 0;
@@ -599,6 +602,7 @@ struct RustDeskIndex {
   }
 
   aboutToDisappear(): void {
+    void this.stopVoiceInput();
     this.rejectPendingInsecureConnection();
     this.clearActiveSessionHandoffState();
     this.unregisterRemoteSessionHandoffListener();
@@ -665,6 +669,7 @@ struct RustDeskIndex {
   }
 
   onPageHide(): void {
+    void this.stopVoiceInput();
     this.pageVisible = false;
     this.hideSystemIme(false);
     this.disableRemoteSessionSharing(true);
@@ -1107,6 +1112,22 @@ struct RustDeskIndex {
           sessionId === this.activeSessionId && this.sendClipboardFiles(paths),
         log: (label: string, payload: string) => this.logRelativeDebug(label, payload),
       });
+      this.voiceInputController = new RemoteVoiceInputController(
+        hostContext,
+        (sessionId: string, pcm: Uint8Array): boolean => {
+          let sent = false;
+          try {
+            sent = native.sessionSendVoicePcm(sessionId, pcm);
+          } catch (error) {
+            this.logRelativeDebug('voice_input', `send failed=${String(error)}`);
+          }
+          if (!sent) {
+            void this.stopVoiceInput();
+            this.errorText = '远程语音传输已停止';
+          }
+          return sent;
+        },
+      );
       this.applySavedSettings(this.preferences.load());
       const easyTierSettings = this.preferences.loadEasyTier();
       this.easyTierPreconnectEnabled = easyTierSettings.enabled;
@@ -2775,6 +2796,7 @@ struct RustDeskIndex {
       return;
     }
     const sessionId = this.activeSessionId;
+    await this.stopVoiceInput();
     const tab = this.remoteSessionTabsController.get(sessionId);
     if (tab !== undefined) {
       tab.coreSessionId = this.activeCoreSessionId;
@@ -3482,6 +3504,7 @@ struct RustDeskIndex {
         this.connectionUiMessage = '';
       }
       const sessionId = this.activeSessionId;
+      await this.stopVoiceInput();
       await this.exitPrivacyModeBeforeClose(sessionId);
       this.rejectPendingInsecureConnection();
       hilog.info(DOMAIN, TAG, 'closeSession sessionId=%{public}s reason=%{public}s', sessionId, reason ?? '');
@@ -3573,6 +3596,7 @@ struct RustDeskIndex {
   }
 
   private handleRemoteDisconnect(message: string): void {
+    void this.stopVoiceInput(false);
     if (this.sessionCloseInFlight) {
       return;
     }
@@ -4517,6 +4541,43 @@ struct RustDeskIndex {
       return;
     }
     this.refreshRemoteAudioState();
+  }
+
+  private async setVoiceInputEnabled(enabled: boolean): Promise<void> {
+    if (!enabled) {
+      await this.stopVoiceInput();
+      return;
+    }
+    if (this.voiceInputState !== 'off' || this.sessionPhase !== 'connected'
+      || this.activeSessionKind !== 'remote_control' || this.activeSessionId.length === 0) {
+      return;
+    }
+    this.voiceInputState = 'waiting';
+    try {
+      const response = this.parseResponse(native.sessionRequestVoiceCall(this.activeSessionId));
+      if (response.ok) {
+        return;
+      }
+      this.voiceInputState = 'off';
+      this.errorText = response.message ?? '无法发起语音输入';
+    } catch (error) {
+      this.voiceInputState = 'off';
+      this.errorText = String(error);
+    }
+  }
+
+  private async stopVoiceInput(closeRemote: boolean = true): Promise<void> {
+    const sessionId = this.activeSessionId;
+    const wasActive = this.voiceInputState !== 'off';
+    this.voiceInputState = 'off';
+    await this.voiceInputController?.stop();
+    if (closeRemote && wasActive && sessionId.length > 0) {
+      try {
+        native.sessionCloseVoiceCall(sessionId);
+      } catch (error) {
+        this.logRelativeDebug('voice_input', `stop failed=${String(error)}`);
+      }
+    }
   }
 
   private openDisplaySheet(): void {
@@ -7170,6 +7231,35 @@ struct RustDeskIndex {
   }
 
   private handleSessionEvent(event: NativeEvent): void {
+    if (event.name === 'on_voice_call_waiting') {
+      this.voiceInputState = 'waiting';
+      return;
+    }
+    if (event.name === 'on_voice_call_started') {
+      const sessionId = this.activeSessionId;
+      if (this.voiceInputState !== 'waiting' || sessionId.length === 0) {
+        void this.stopVoiceInput();
+        return;
+      }
+      const controller = this.voiceInputController;
+      if (controller === undefined) {
+        void this.stopVoiceInput();
+        return;
+      }
+      void controller.start(sessionId).then((started: boolean): void => {
+        if (started && this.activeSessionId === sessionId && this.voiceInputState === 'waiting') {
+          this.voiceInputState = 'on';
+        } else {
+          void this.stopVoiceInput();
+          this.errorText = '无法开启麦克风，请检查录音权限';
+        }
+      });
+      return;
+    }
+    if (event.name === 'on_voice_call_closed') {
+      void this.stopVoiceInput(false);
+      return;
+    }
     if (event.name === 'close') {
       this.remoteSessionTabsController.markPhase(this.activeSessionId, 'closed', '远端连接已结束');
       this.syncRemoteSessionTabs();
@@ -7973,6 +8063,8 @@ struct RustDeskIndex {
             systemImeActive: this.systemImeActive,
             audioAvailable: this.remoteAudioState.available,
             audioMuted: this.remoteAudioState.muted,
+            voiceInputAvailable: this.sessionPhase === 'connected' && this.activeSessionKind === 'remote_control',
+            voiceInputState: this.voiceInputState,
             privacyModeAvailable: this.privacyModeAvailable(),
             privacyModeEnabled: this.privacyModeEnabled,
             privacyModeBusy: this.privacyModeBusy,
@@ -7989,6 +8081,7 @@ struct RustDeskIndex {
             onResetTransform: () => this.resetPreviewViewTransform(),
             onOpenChat: () => this.openChatDrawer(),
             onAudioChange: (enabled: boolean) => this.setRemoteAudioEnabled(enabled),
+            onVoiceInputChange: (enabled: boolean) => void this.setVoiceInputEnabled(enabled),
             onPrivacyModeChange: (enabled: boolean) => void this.setPrivacyModeEnabled(enabled),
             onOpenDisplay: () => this.openDisplaySheet(),
             onOpenQuality: () => this.openQualitySheet(),
