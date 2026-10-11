@@ -43,7 +43,6 @@ const LOCK_MODE_SCROLL = 1 << 3;
 export interface RustDeskInputControllerCallbacks {
   isSessionActive: () => boolean;
   isMouseMode: () => boolean;
-  isPeerMacOS: () => boolean;
   isPeerAndroid: () => boolean;
   isPeerMobile: () => boolean;
   isLocalPhone: () => boolean;
@@ -72,6 +71,7 @@ export class RustDeskInputController {
   private mouseModeActive: boolean;
   private relativeModeActive: boolean;
   private activeModifiers: Set<RustDeskModifierKey> = new Set();
+  private keysDown: Set<number> = new Set();
   private interceptedKeysDown: Set<number> = new Set();
   private touchGestureState: RustDeskTouchGestureState = new RustDeskTouchGestureState();
   private touchPrimaryId: number = -1;
@@ -129,7 +129,7 @@ export class RustDeskInputController {
     this.clearTouchPointerState();
     this.touchSuppressedIds.clear();
     this.releasePressedButtons();
-    this.releaseInterceptedKeys();
+    this.releaseKeys();
     this.activeModifiers.clear();
     this.virtualCursorValid = false;
   }
@@ -264,6 +264,11 @@ export class RustDeskInputController {
     if (!sent) {
       return false;
     }
+    if (isDown) {
+      this.keysDown.add(event.keyCode);
+    } else {
+      this.keysDown.delete(event.keyCode);
+    }
     if (mapping.modifier && isDown) {
       this.activeModifiers.add(mapping.modifier);
     }
@@ -293,7 +298,7 @@ export class RustDeskInputController {
     let sent = false;
     const usbHid = mapHarmonyKeyCodeToUsbHid(keyCode);
     if (usbHid !== undefined) {
-      const flutterPayload = new RustDeskFlutterKeyPayload('', this.mapUsbHidForPeer(usbHid), 0, isDown);
+      const flutterPayload = new RustDeskFlutterKeyPayload('', usbHid, 0, isDown);
       sent = this.callbacks.sendFlutterKey(flutterPayload);
       this.callbacks.log(
         'keyboard_intercepted_flutter',
@@ -320,15 +325,29 @@ export class RustDeskInputController {
     return sent;
   }
 
-  releaseInterceptedKeys(): void {
-    if (this.interceptedKeysDown.size === 0) {
-      return;
-    }
+  releaseKeys(): void {
     const keyCodes: number[] = [];
-    this.interceptedKeysDown.forEach((keyCode: number) => keyCodes.push(keyCode));
+    this.keysDown.forEach((keyCode: number) => keyCodes.push(keyCode));
+    this.interceptedKeysDown.forEach((keyCode: number) => {
+      if (keyCodes.indexOf(keyCode) < 0) {
+        keyCodes.push(keyCode);
+      }
+    });
     for (let index = 0; index < keyCodes.length; index++) {
-      this.handleInterceptedKeyEvent(keyCodes[index], 2);
+      const keyCode = keyCodes[index];
+      const mapping = mapHarmonyKeyCode(keyCode);
+      if (!mapping) {
+        continue;
+      }
+      if (mapping.modifier) {
+        this.activeModifiers.delete(mapping.modifier);
+      }
+      const usbHid = mapHarmonyKeyCodeToUsbHid(keyCode);
+      if (usbHid === undefined || !this.callbacks.sendFlutterKey(new RustDeskFlutterKeyPayload('', usbHid, 0, false))) {
+        this.sendLegacyKey(mapping, false);
+      }
     }
+    this.keysDown.clear();
     this.interceptedKeysDown.clear();
     this.activeModifiers.clear();
   }
@@ -345,15 +364,11 @@ export class RustDeskInputController {
   }
 
   private sendLegacyKey(mapping: RustDeskKeyMapping, isDown: boolean): boolean {
-    const payload = new RustDeskKeyPayload(this.mapLegacyKeyNameForPeer(mapping), isDown);
+    const payload = new RustDeskKeyPayload(mapping.name, isDown);
     payload.alt = this.activeModifiers.has('alt');
     payload.shift = this.activeModifiers.has('shift');
     payload.command = this.activeModifiers.has('command');
     payload.ctrl = this.activeModifiers.has('ctrl');
-    if (this.shouldTreatLocalCtrlAsCommand()) {
-      payload.command = payload.command || payload.ctrl;
-      payload.ctrl = false;
-    }
     return this.callbacks.sendKey(payload);
   }
 
@@ -364,34 +379,10 @@ export class RustDeskInputController {
     }
     return new RustDeskFlutterKeyPayload(
       this.resolveKeyCharacter(event, isDown),
-      this.mapUsbHidForPeer(usbHid),
+      usbHid,
       this.buildLockModes(event),
       isDown,
     );
-  }
-
-  private shouldTreatLocalCtrlAsCommand(): boolean {
-    return this.callbacks.isPeerMacOS();
-  }
-
-  private mapLegacyKeyNameForPeer(mapping: RustDeskKeyMapping): string {
-    if (!this.shouldTreatLocalCtrlAsCommand() || mapping.modifier !== 'ctrl') {
-      return mapping.name;
-    }
-    return mapping.name === 'RControl' ? 'RWin' : 'Meta';
-  }
-
-  private mapUsbHidForPeer(usbHid: number): number {
-    if (!this.shouldTreatLocalCtrlAsCommand()) {
-      return usbHid;
-    }
-    if (usbHid === 0xE0) {
-      return 0xE3;
-    }
-    if (usbHid === 0xE4) {
-      return 0xE7;
-    }
-    return usbHid;
   }
 
   private buildLockModes(event: KeyEvent): number {

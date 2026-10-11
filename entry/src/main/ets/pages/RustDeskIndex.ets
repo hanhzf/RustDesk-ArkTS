@@ -557,6 +557,10 @@ struct RustDeskIndex {
   };
   private onRemoteSessionAppState = (foreground: boolean): void => {
     this.appForeground = foreground;
+    if (!foreground) {
+      this.previewKeyboardCaptureFocused = false;
+    }
+    this.syncInputInterceptor();
     if (foreground && this.pageVisible) {
       this.schedulePeerOnlineProbe(0);
     } else {
@@ -746,7 +750,6 @@ struct RustDeskIndex {
       this.inputController = new RustDeskInputController({
         isSessionActive: () => this.isRemoteControlSessionActive(),
         isMouseMode: () => !this.touchMode,
-        isPeerMacOS: () => this.isPeerMacOS(),
         isPeerAndroid: () => this.isPeerAndroid(),
         isPeerMobile: () => this.isPeerMobile(),
         isLocalPhone: () => deviceInfo.deviceType === 'phone',
@@ -4391,7 +4394,8 @@ struct RustDeskIndex {
   }
 
   private shouldEnableInputInterceptor(): boolean {
-    return this.pageVisible &&
+    return this.appForeground &&
+      this.pageVisible &&
       this.remoteInteractionReady &&
       this.isRemoteControlSessionActive() &&
       this.showPreviewModal &&
@@ -4422,10 +4426,10 @@ struct RustDeskIndex {
   }
 
   private stopInputInterceptor(): void {
+    this.inputController?.releaseKeys();
     if (!this.inputInterceptorActive) {
       return;
     }
-    this.inputController?.releaseInterceptedKeys();
     try {
       const response = JSON.parse(native.inputInterceptorStop()) as InputInterceptorResponse;
       this.inputInterceptorActive = response.active === true;
@@ -4473,6 +4477,7 @@ struct RustDeskIndex {
     this.previewKeyboardBlurTimer = setTimeout(() => {
       this.previewKeyboardBlurTimer = -1;
       this.previewKeyboardCaptureFocused = false;
+      this.inputController?.releaseKeys();
       this.syncInputInterceptor();
     }, 1) as number;
   }
