@@ -8049,26 +8049,26 @@ struct RustDeskIndex {
     Button({ type: ButtonType.Normal, stateEffect: true }) {
       Stack({ alignContent: Alignment.Center }) {
         SymbolGlyph(this.voiceInputState === 'on' ? $r('sys.symbol.mic_fill') : $r('sys.symbol.mic'))
-          .fontSize(17)
+          .fontSize(12)
           .fontColor([this.voiceInputState === 'on'
             ? $r('app.color.white')
             : $r('app.color.neu_accent')])
-          .translate({ y: side ? 0 : 3 });
+          .translate({ y: side ? 0 : 7 });
 
         if (this.voiceInputState === 'on') {
           Stack()
-            .width(6)
-            .height(6)
-            .position({ x: side ? 19 : 27, y: side ? 3 : 16 })
+            .width(4)
+            .height(4)
+            .position({ x: side ? 20 : 27, y: side ? 4 : 20 })
             .backgroundColor($r('app.color.error'))
-            .borderRadius(3);
+            .borderRadius(2);
         }
       }
       .width('100%')
       .height('100%');
     }
     .width(side ? 28 : 36)
-    .height(side ? 36 : 42)
+    .height(28)
     .padding(0)
     .backgroundColor(this.voiceInputState === 'on'
       ? $r('app.color.brand_primary')
@@ -8322,7 +8322,7 @@ struct RustDeskIndex {
             .height('100%');
           }
           .width(68)
-          .height(42)
+          .height(28)
           .padding(0)
           .backgroundColor($r('app.color.glass_surface'))
           .backgroundBlurStyle(BlurStyle.BACKGROUND_THICK, {
