@@ -187,6 +187,21 @@ export struct SessionToolbar {
     return 64;
   }
 
+  private voiceInputButtonWidth(): number {
+    const reservedWidth = this.addSessionButtonWidth() + 12 + 96;
+    return Math.min(320, Math.max(96, this.toolbarWidth - reservedWidth));
+  }
+
+  private voiceInputLabel(): string {
+    if (this.voiceInputState === 'on') {
+      return '停止语音输入';
+    }
+    if (this.voiceInputState === 'waiting') {
+      return '取消语音输入（等待 Mac 接听）';
+    }
+    return '语音输入';
+  }
+
   private sessionContentWidth(): number {
     const contentWidth = this.tabs.length * this.sessionCardWidth() + Math.max(0, this.tabs.length - 1) * 6;
     return Math.max(this.sessionTabsViewportWidth, contentWidth);
@@ -342,6 +357,28 @@ export struct SessionToolbar {
           this.scheduleRevealActiveSession();
         }
       });
+
+      if (this.voiceInputAvailable) {
+        Button({ type: ButtonType.Normal, stateEffect: true }) {
+          Text(this.voiceInputLabel())
+            .fontSize($r('app.float.font_label'))
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.white'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
+        }
+        .width(this.voiceInputButtonWidth())
+        .height(48)
+        .padding({ left: $r('app.float.space_12'), right: $r('app.float.space_12') })
+        .backgroundColor($r('app.color.brand_primary'))
+        .borderRadius($r('app.float.radius_14'))
+        .shadow(ShadowStyle.OUTER_DEFAULT_SM)
+        .hoverEffect(HoverEffect.Auto)
+        .accessibilityText(this.voiceInputLabel())
+        .onClick((): void => {
+          this.onVoiceInputChange(this.voiceInputState === 'off');
+        });
+      }
 
       Button({ type: ButtonType.Normal, stateEffect: true }) {
         Column({ space: 1 }) {
@@ -951,15 +988,6 @@ export struct SessionToolbar {
       if (this.activeOverlayPanel === 'home') {
         Column({ space: $r('app.float.space_8') }) {
           this.FunctionHome();
-
-          if (this.voiceInputAvailable) {
-            Button(this.voiceInputState === 'on' ? '停止语音输入' :
-              this.voiceInputState === 'waiting' ? '取消语音输入（等待 Mac 接听）' : '语音输入')
-              .width('100%')
-              .onClick((): void => {
-                this.onVoiceInputChange(this.voiceInputState === 'off');
-              });
-          }
 
           if (this.androidNavigationAvailable) {
             Row() {

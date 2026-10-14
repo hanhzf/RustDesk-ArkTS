@@ -4585,6 +4585,10 @@ struct RustDeskIndex {
     }
   }
 
+  private remoteVoiceInputAvailable(): boolean {
+    return this.sessionPhase === 'connected' && this.activeSessionKind === 'remote_control';
+  }
+
   private openDisplaySheet(): void {
     if (!this.isRemoteDesktopSessionActive()) {
       this.sessionMessage = '请先建立远程桌面连接';
@@ -8041,10 +8045,74 @@ struct RustDeskIndex {
   }
 
   @Builder
+  private MiniVoiceInputAction(side: boolean) {
+    Button({ type: ButtonType.Normal, stateEffect: true }) {
+      Stack({ alignContent: Alignment.Center }) {
+        SymbolGlyph(this.voiceInputState === 'on' ? $r('sys.symbol.mic_fill') : $r('sys.symbol.mic'))
+          .fontSize(17)
+          .fontColor([this.voiceInputState === 'on'
+            ? $r('app.color.white')
+            : $r('app.color.neu_accent')])
+          .translate({ y: side ? 0 : 3 });
+
+        if (this.voiceInputState === 'on') {
+          Stack()
+            .width(6)
+            .height(6)
+            .position({ x: side ? 19 : 27, y: side ? 3 : 16 })
+            .backgroundColor($r('app.color.error'))
+            .borderRadius(3);
+        }
+      }
+      .width('100%')
+      .height('100%');
+    }
+    .width(side ? 28 : 36)
+    .height(side ? 36 : 42)
+    .padding(0)
+    .backgroundColor(this.voiceInputState === 'on'
+      ? $r('app.color.brand_primary')
+      : (this.voiceInputState === 'waiting'
+        ? $r('app.color.brand_primary_soft')
+        : $r('app.color.glass_surface')))
+    .backgroundBlurStyle(BlurStyle.BACKGROUND_THICK, {
+      adaptiveColor: AdaptiveColor.DEFAULT,
+      scale: 0.68,
+    })
+    .border({
+      width: 1,
+      color: this.voiceInputState === 'on'
+        ? $r('app.color.brand_primary')
+        : $r('app.color.mica_border'),
+    })
+    .borderRadius(side
+      ? { topLeft: $r('app.float.radius_14'), bottomLeft: $r('app.float.radius_14') }
+      : { bottomLeft: $r('app.float.radius_14'), bottomRight: $r('app.float.radius_14') })
+    .clip(true)
+    .shadow(ShadowStyle.OUTER_DEFAULT_MD)
+    .hoverEffect(HoverEffect.None)
+    .focusable(false)
+    .accessibilityText(this.voiceInputState === 'on'
+      ? '停止语音输入'
+      : (this.voiceInputState === 'waiting' ? '取消语音输入，等待 Mac 接听' : '开始语音输入'))
+    .accessibilitySelected(this.voiceInputState === 'on')
+    .onClick((): void => {
+      void this.setVoiceInputEnabled(this.voiceInputState === 'off');
+    });
+  }
+
+  @Builder
   previewMiniBar() {
     if (this.isMiniBarExpanded) {
-      Row() {
-        Column({ space: 10 }) {
+      Row()
+        .width('100%')
+        .height('100%')
+        .backgroundColor($r('app.color.transparent'))
+        .hitTestBehavior(HitTestMode.BLOCK_HIERARCHY)
+        .onClick((): void => this.collapseSessionToolbar())
+        .zIndex(29);
+
+      Column({ space: 10 }) {
           SessionToolbar({
             tabs: this.remoteSessionTabs,
             activeSessionId: this.remoteSessionTabsController.activeId(),
@@ -8068,7 +8136,7 @@ struct RustDeskIndex {
             systemImeActive: this.systemImeActive,
             audioAvailable: this.remoteAudioState.available,
             audioMuted: this.remoteAudioState.muted,
-            voiceInputAvailable: this.sessionPhase === 'connected' && this.activeSessionKind === 'remote_control',
+            voiceInputAvailable: this.remoteVoiceInputAvailable(),
             voiceInputState: this.voiceInputState,
             privacyModeAvailable: this.privacyModeAvailable(),
             privacyModeEnabled: this.privacyModeEnabled,
@@ -8126,43 +8194,114 @@ struct RustDeskIndex {
               }
             },
           });
-        }
-        .width('95%')
-        .padding($r('app.float.space_12'))
-        .margin({
-          top: Math.max(16, this.windowTopAvoidInset + 8),
-        })
-        .backgroundColor($r('app.color.glass_surface'))
-        .backgroundBlurStyle(BlurStyle.BACKGROUND_THICK, {
-          adaptiveColor: AdaptiveColor.DEFAULT,
-          scale: 0.68,
-        })
-        .linearGradient({
-          angle: 142,
-          colors: [
-            [$r('app.color.mica_highlight'), 0],
-            [$r('app.color.transparent'), 0.52],
-            [$r('app.color.transparent'), 1],
-          ],
-        })
-        .border({ width: 1, color: $r('app.color.mica_border') })
-        .borderRadius($r('app.float.radius_24'))
-        .clip(false)
-        .shadow(ShadowStyle.OUTER_DEFAULT_MD)
-        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.95, y: 0.95 })));
       }
-      .width('100%')
-      .justifyContent(FlexAlign.Center)
+      .width('95%')
+      .padding($r('app.float.space_12'))
+      .margin({
+        top: Math.max(16, this.windowTopAvoidInset + 8),
+      })
+      .backgroundColor($r('app.color.glass_surface'))
+      .backgroundBlurStyle(BlurStyle.BACKGROUND_THICK, {
+        adaptiveColor: AdaptiveColor.DEFAULT,
+        scale: 0.68,
+      })
+      .linearGradient({
+        angle: 142,
+        colors: [
+          [$r('app.color.mica_highlight'), 0],
+          [$r('app.color.transparent'), 0.52],
+          [$r('app.color.transparent'), 1],
+        ],
+      })
+      .border({ width: 1, color: $r('app.color.mica_border') })
+      .borderRadius($r('app.float.radius_24'))
+      .clip(false)
+      .shadow(ShadowStyle.OUTER_DEFAULT_MD)
       .hitTestBehavior(HitTestMode.BLOCK_HIERARCHY)
+      .transition(TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.95, y: 0.95 })))
       .zIndex(30);
     } else {
       if (this.isMiniBarOnSide()) {
         Row() {
+          Column({ space: 2 }) {
+            Button({ type: ButtonType.Normal, stateEffect: true }) {
+              Stack({ alignContent: Alignment.Center }) {
+                Stack()
+                  .width(4)
+                  .height(36)
+                  .backgroundColor($r('app.color.neu_text_secondary'))
+                  .borderRadius(2)
+                  .opacity(0.72);
+
+                if (this.rootFocusedControl === 'mini-toolbar') {
+                  Row()
+                    .width('100%')
+                    .height('100%')
+                    .border({ width: 2, color: $r('app.color.focus_ring') })
+                    .borderRadius({
+                      topLeft: $r('app.float.radius_14'),
+                      bottomLeft: $r('app.float.radius_14'),
+                    })
+                    .hitTestBehavior(HitTestMode.None);
+                }
+              }
+              .width('100%')
+              .height('100%');
+            }
+            .width(28)
+            .height(68)
+            .padding(0)
+            .backgroundColor($r('app.color.glass_surface'))
+            .backgroundBlurStyle(BlurStyle.BACKGROUND_THICK, {
+              adaptiveColor: AdaptiveColor.DEFAULT,
+              scale: 0.68,
+            })
+            .linearGradient({
+              angle: 142,
+              colors: [
+                [$r('app.color.mica_highlight'), 0],
+                [$r('app.color.transparent'), 0.58],
+                [$r('app.color.transparent'), 1],
+              ],
+            })
+            .border({ width: 1, color: $r('app.color.mica_border') })
+            .borderRadius({
+              topLeft: $r('app.float.radius_14'),
+              bottomLeft: $r('app.float.radius_14'),
+            })
+            .clip(true)
+            .shadow(ShadowStyle.OUTER_DEFAULT_MD)
+            .hoverEffect(HoverEffect.None)
+            .focusOnTouch(true)
+            .accessibilityText('展开远控工具栏')
+            .onFocus(() => this.setRootControlFocused('mini-toolbar', true))
+            .onBlur(() => this.setRootControlFocused('mini-toolbar', false))
+            .onClick((): void => {
+              this.getUIContext()?.animateTo({ duration: 300, curve: Curve.FastOutSlowIn }, () => {
+                this.isMiniBarExpanded = true;
+              });
+            })
+            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ x: 10 })));
+
+            if (this.remoteVoiceInputAvailable()) {
+              this.MiniVoiceInputAction(true);
+            }
+          }
+          .hitTestBehavior(HitTestMode.BLOCK_HIERARCHY)
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.End)
+        .position({ x: 0, y: Math.max(80, this.windowTopAvoidInset + 60) })
+        .hitTestBehavior(HitTestMode.Transparent)
+        .zIndex(30);
+      } else {
+      Row() {
+        Row({ space: 2 }) {
           Button({ type: ButtonType.Normal, stateEffect: true }) {
             Stack({ alignContent: Alignment.Center }) {
               Stack()
-                .width(4)
-                .height(36)
+                .width(36)
+                .height(4)
                 .backgroundColor($r('app.color.neu_text_secondary'))
                 .borderRadius(2)
                 .opacity(0.72);
@@ -8173,8 +8312,8 @@ struct RustDeskIndex {
                   .height('100%')
                   .border({ width: 2, color: $r('app.color.focus_ring') })
                   .borderRadius({
-                    topLeft: $r('app.float.radius_14'),
                     bottomLeft: $r('app.float.radius_14'),
+                    bottomRight: $r('app.float.radius_14'),
                   })
                   .hitTestBehavior(HitTestMode.None);
               }
@@ -8182,8 +8321,8 @@ struct RustDeskIndex {
             .width('100%')
             .height('100%');
           }
-          .width(28)
-          .height(68)
+          .width(68)
+          .height(42)
           .padding(0)
           .backgroundColor($r('app.color.glass_surface'))
           .backgroundBlurStyle(BlurStyle.BACKGROUND_THICK, {
@@ -8200,8 +8339,8 @@ struct RustDeskIndex {
           })
           .border({ width: 1, color: $r('app.color.mica_border') })
           .borderRadius({
-            topLeft: $r('app.float.radius_14'),
             bottomLeft: $r('app.float.radius_14'),
+            bottomRight: $r('app.float.radius_14'),
           })
           .clip(true)
           .shadow(ShadowStyle.OUTER_DEFAULT_MD)
@@ -8215,78 +8354,19 @@ struct RustDeskIndex {
               this.isMiniBarExpanded = true;
             });
           })
-          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ x: 10 })));
-        }
-        .width('100%')
-        .justifyContent(FlexAlign.End)
-        .position({ x: 0, y: Math.max(80, this.windowTopAvoidInset + 60) })
-        .hitTestBehavior(HitTestMode.BLOCK_HIERARCHY)
-        .zIndex(30);
-      } else {
-      Row() {
-        Button({ type: ButtonType.Normal, stateEffect: true }) {
-          Stack({ alignContent: Alignment.Center }) {
-            Stack()
-              .width(36)
-              .height(4)
-              .backgroundColor($r('app.color.neu_text_secondary'))
-              .borderRadius(2)
-              .opacity(0.72);
+          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -10 })));
 
-            if (this.rootFocusedControl === 'mini-toolbar') {
-              Row()
-                .width('100%')
-                .height('100%')
-                .border({ width: 2, color: $r('app.color.focus_ring') })
-                .borderRadius({
-                  bottomLeft: $r('app.float.radius_14'),
-                  bottomRight: $r('app.float.radius_14'),
-                })
-                .hitTestBehavior(HitTestMode.None);
-            }
+          if (this.remoteVoiceInputAvailable()) {
+            this.MiniVoiceInputAction(false);
           }
-          .width('100%')
-          .height('100%');
         }
-        .width(68)
-        .height(28)
-        .padding(0)
-        .backgroundColor($r('app.color.glass_surface'))
-        .backgroundBlurStyle(BlurStyle.BACKGROUND_THICK, {
-          adaptiveColor: AdaptiveColor.DEFAULT,
-          scale: 0.68,
-        })
-        .linearGradient({
-          angle: 142,
-          colors: [
-            [$r('app.color.mica_highlight'), 0],
-            [$r('app.color.transparent'), 0.58],
-            [$r('app.color.transparent'), 1],
-          ],
-        })
-        .border({ width: 1, color: $r('app.color.mica_border') })
-        .borderRadius({
-          bottomLeft: $r('app.float.radius_14'),
-          bottomRight: $r('app.float.radius_14'),
-        })
-        .clip(true)
-        .shadow(ShadowStyle.OUTER_DEFAULT_MD)
-        .hoverEffect(HoverEffect.None)
-        .focusOnTouch(true)
-        .accessibilityText('展开远控工具栏')
-        .onFocus(() => this.setRootControlFocused('mini-toolbar', true))
-        .onBlur(() => this.setRootControlFocused('mini-toolbar', false))
-        .onClick((): void => {
-          this.getUIContext()?.animateTo({ duration: 300, curve: Curve.FastOutSlowIn }, () => {
-            this.isMiniBarExpanded = true;
-          });
-        })
-        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -10 })));
+        .translate({ x: this.remoteVoiceInputAvailable() ? 19 : 0 })
+        .hitTestBehavior(HitTestMode.BLOCK_HIERARCHY)
       }
       .width('100%')
       .justifyContent(FlexAlign.Center)
       .position({ x: 0, y: -14 })
-      .hitTestBehavior(HitTestMode.BLOCK_HIERARCHY)
+      .hitTestBehavior(HitTestMode.Transparent)
       .zIndex(30);
       }
     }
