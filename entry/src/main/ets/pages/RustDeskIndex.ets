@@ -749,6 +749,7 @@ struct RustDeskIndex {
     if (!this.inputController) {
       this.inputController = new RustDeskInputController({
         isSessionActive: () => this.isRemoteControlSessionActive(),
+        swapPhysicalControlAndMeta: () => this.isPeerMacOS(),
         isMouseMode: () => !this.touchMode,
         isPeerAndroid: () => this.isPeerAndroid(),
         isPeerMobile: () => this.isPeerMobile(),
@@ -2835,6 +2836,7 @@ struct RustDeskIndex {
       tab.forceRelay = this.activeSessionForceRelay;
     }
     await this.clipboardController?.stopAndDrainRemoteWrite();
+    this.inputController?.releaseKeys();
     this.inputController?.releasePressedButtons();
     this.hideSystemIme(false);
     this.hideSoftKeyboard();
@@ -2847,6 +2849,8 @@ struct RustDeskIndex {
     this.showPreviewModal = false;
     this.previewSurfaceVisible = false;
     this.connectionGeneration += 1;
+    this.inputController?.releaseKeys();
+    this.inputController?.discardKeys();
     this.activeSessionId = '';
     this.activeCoreSessionId = '';
     this.syncClipboardController();
@@ -4426,20 +4430,19 @@ struct RustDeskIndex {
   }
 
   private stopInputInterceptor(): void {
+    if (this.inputInterceptorActive) {
+      try {
+        const response = JSON.parse(native.inputInterceptorStop()) as InputInterceptorResponse;
+        this.inputInterceptorActive = response.active === true;
+        this.logRelativeDebug(
+          'input_interceptor',
+          `stop ok=${response.ok} active=${this.inputInterceptorActive} result=${String(response.result ?? '')} message=${String(response.message ?? '')}`,
+        );
+      } catch (error) {
+        this.logRelativeDebug('input_interceptor', `stop failed=${String(error)}`);
+      }
+    }
     this.inputController?.releaseKeys();
-    if (!this.inputInterceptorActive) {
-      return;
-    }
-    try {
-      const response = JSON.parse(native.inputInterceptorStop()) as InputInterceptorResponse;
-      this.inputInterceptorActive = response.active === true;
-      this.logRelativeDebug(
-        'input_interceptor',
-        `stop ok=${response.ok} active=${this.inputInterceptorActive} result=${String(response.result ?? '')} message=${String(response.message ?? '')}`,
-      );
-    } catch (error) {
-      this.logRelativeDebug('input_interceptor', `stop failed=${String(error)}`);
-    }
   }
 
   private pollInputInterceptorEvents(): void {
@@ -4447,6 +4450,7 @@ struct RustDeskIndex {
       return;
     }
     try {
+      const wasActive = this.inputInterceptorActive;
       const response = JSON.parse(native.inputInterceptorPollEvents(32)) as InputInterceptorResponse;
       this.inputInterceptorActive = response.active === true;
       const events = response.events ?? [];
@@ -4460,6 +4464,9 @@ struct RustDeskIndex {
           }
           this.getInputController().handleInterceptedKeyEvent(event.keyCode, event.action);
         }
+      }
+      if (wasActive && !this.inputInterceptorActive) {
+        this.inputController?.releaseKeys();
       }
     } catch (error) {
       this.logRelativeDebug('input_interceptor', `poll failed=${String(error)}`);
@@ -4477,7 +4484,7 @@ struct RustDeskIndex {
     this.previewKeyboardBlurTimer = setTimeout(() => {
       this.previewKeyboardBlurTimer = -1;
       this.previewKeyboardCaptureFocused = false;
-      this.inputController?.releaseKeys();
+      this.stopInputInterceptor();
       this.syncInputInterceptor();
     }, 1) as number;
   }
@@ -6561,6 +6568,10 @@ struct RustDeskIndex {
     }
     if (!this.isRemoteControlSessionActive()) {
       return false;
+    }
+    if (this.inputInterceptorActive) {
+      event.stopPropagation();
+      return true;
     }
     this.requestPreviewInputFocus();
     this.logRelativeDebug('keyboard_event', `keyCode=${event.keyCode} type=${String(event.type)} keyText=${String(event.keyText ?? '')} unicode=${String(event.unicode ?? '')}`);

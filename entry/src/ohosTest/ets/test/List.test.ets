@@ -2,6 +2,7 @@ import backgroundTaskStateTest from './BackgroundTaskState.test';
 import chatStoreTest from './ChatStore.test';
 import downloadRootManagerTest from './DownloadRootManager.test';
 import pressedButtonStateTest from './RustDeskPressedButtonState.test';
+import rustDeskPhysicalKeyMappingTest from './RustDeskPhysicalKeyMapping.test';
 import rustDeskImeInputControllerTest from './RustDeskImeInputController.test';
 import remoteSessionOrientationPolicyTest from './RemoteSessionOrientationPolicy.test';
 import remoteSessionHandoffServiceTest from './RemoteSessionHandoffService.test';
@@ -19,6 +20,7 @@ export default function testsuite(): void {
   chatStoreTest();
   downloadRootManagerTest();
   pressedButtonStateTest();
+  rustDeskPhysicalKeyMappingTest();
   rustDeskImeInputControllerTest();
   remoteSessionOrientationPolicyTest();
   remoteSessionHandoffServiceTest();

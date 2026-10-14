@@ -2,6 +2,7 @@ import {
   isLocalPointInsidePaintRect,
   mapHarmonyKeyCodeToUsbHid,
   mapHarmonyKeyCode,
+  mapHarmonyPhysicalKeyCode,
   mapLocalToRemote,
   mapMouseButton,
   mapViewDeltaToBase,
@@ -40,8 +41,11 @@ const LOCK_MODE_CAPS = 1 << 1;
 const LOCK_MODE_NUM = 1 << 2;
 const LOCK_MODE_SCROLL = 1 << 3;
 
+type RustDeskKeyTransport = 'flutter' | 'legacy';
+
 export interface RustDeskInputControllerCallbacks {
   isSessionActive: () => boolean;
+  swapPhysicalControlAndMeta: () => boolean;
   isMouseMode: () => boolean;
   isPeerAndroid: () => boolean;
   isPeerMobile: () => boolean;
@@ -70,9 +74,10 @@ export class RustDeskInputController {
   private callbacks: RustDeskInputControllerCallbacks;
   private mouseModeActive: boolean;
   private relativeModeActive: boolean;
-  private activeModifiers: Set<RustDeskModifierKey> = new Set();
+  private activeModifierKeys: Map<number, RustDeskModifierKey> = new Map();
   private keysDown: Set<number> = new Set();
   private interceptedKeysDown: Set<number> = new Set();
+  private keyTransports: Map<number, RustDeskKeyTransport> = new Map();
   private touchGestureState: RustDeskTouchGestureState = new RustDeskTouchGestureState();
   private touchPrimaryId: number = -1;
   private touchSecondaryId: number = -1;
@@ -130,7 +135,7 @@ export class RustDeskInputController {
     this.touchSuppressedIds.clear();
     this.releasePressedButtons();
     this.releaseKeys();
-    this.activeModifiers.clear();
+    this.discardKeys();
     this.virtualCursorValid = false;
   }
 
@@ -234,7 +239,8 @@ export class RustDeskInputController {
       this.callbacks.log('keyboard_ignored', `unsupported_type keyCode=${event.keyCode} type=${this.keyEventTypeName(event.type)}`);
       return false;
     }
-    const mapping = mapHarmonyKeyCode(event.keyCode);
+    const remoteKeyCode = this.remotePhysicalKeyCode(event.keyCode);
+    const mapping = mapHarmonyKeyCode(remoteKeyCode);
     if (!mapping) {
       this.callbacks.log(
         'keyboard_unmapped',
@@ -242,35 +248,52 @@ export class RustDeskInputController {
       );
       return false;
     }
+    const modifierWasActive = mapping.modifier !== undefined && this.activeModifierKeys.has(event.keyCode);
     if (mapping.modifier && isUp) {
-      this.activeModifiers.delete(mapping.modifier);
+      this.activeModifierKeys.delete(event.keyCode);
     }
+    const requiredTransport = this.keyTransports.get(event.keyCode);
     let sent = false;
-    const flutterPayload = this.buildFlutterKeyPayload(event, isDown);
-    if (flutterPayload) {
+    let sentTransport: RustDeskKeyTransport | undefined;
+    const flutterPayload = this.buildFlutterKeyPayload(event, remoteKeyCode, isDown);
+    if (flutterPayload && requiredTransport !== 'legacy') {
       sent = this.callbacks.sendFlutterKey(flutterPayload);
+      if (sent) {
+        sentTransport = 'flutter';
+      }
       this.callbacks.log(
         'keyboard_flutter',
         `sent=${sent} keyCode=${event.keyCode} type=${this.keyEventTypeName(event.type)} name=${mapping.name} usb=${flutterPayload.usb_hid} charLen=${flutterPayload.character.length}`,
       );
     }
-    if (!sent) {
+    if (!sent && requiredTransport !== 'flutter') {
       sent = this.sendLegacyKey(mapping, isDown);
+      if (sent) {
+        sentTransport = 'legacy';
+      }
       this.callbacks.log(
         'keyboard_legacy',
         `sent=${sent} keyCode=${event.keyCode} type=${this.keyEventTypeName(event.type)} name=${mapping.name}`,
       );
     }
     if (!sent) {
+      if (mapping.modifier && isUp && modifierWasActive) {
+        this.activeModifierKeys.set(event.keyCode, mapping.modifier);
+      }
       return false;
     }
     if (isDown) {
       this.keysDown.add(event.keyCode);
+      if (sentTransport !== undefined && requiredTransport === undefined) {
+        this.keyTransports.set(event.keyCode, sentTransport);
+      }
     } else {
       this.keysDown.delete(event.keyCode);
+      this.interceptedKeysDown.delete(event.keyCode);
+      this.keyTransports.delete(event.keyCode);
     }
     if (mapping.modifier && isDown) {
-      this.activeModifiers.add(mapping.modifier);
+      this.activeModifierKeys.set(event.keyCode, mapping.modifier);
     }
     event.stopPropagation();
     return true;
@@ -287,26 +310,36 @@ export class RustDeskInputController {
       this.callbacks.log('keyboard_intercepted_ignored', `unsupported keyCode=${keyCode} action=${action}`);
       return false;
     }
-    const mapping = mapHarmonyKeyCode(keyCode);
+    const remoteKeyCode = this.remotePhysicalKeyCode(keyCode);
+    const mapping = mapHarmonyKeyCode(remoteKeyCode);
     if (!mapping) {
       this.callbacks.log('keyboard_intercepted_unmapped', `keyCode=${keyCode} action=${action}`);
       return false;
     }
+    const modifierWasActive = mapping.modifier !== undefined && this.activeModifierKeys.has(keyCode);
     if (mapping.modifier && isUp) {
-      this.activeModifiers.delete(mapping.modifier);
+      this.activeModifierKeys.delete(keyCode);
     }
+    const requiredTransport = this.keyTransports.get(keyCode);
     let sent = false;
-    const usbHid = mapHarmonyKeyCodeToUsbHid(keyCode);
-    if (usbHid !== undefined) {
+    let sentTransport: RustDeskKeyTransport | undefined;
+    const usbHid = mapHarmonyKeyCodeToUsbHid(remoteKeyCode);
+    if (usbHid !== undefined && requiredTransport !== 'legacy') {
       const flutterPayload = new RustDeskFlutterKeyPayload('', usbHid, 0, isDown);
       sent = this.callbacks.sendFlutterKey(flutterPayload);
+      if (sent) {
+        sentTransport = 'flutter';
+      }
       this.callbacks.log(
         'keyboard_intercepted_flutter',
         `sent=${sent} keyCode=${keyCode} action=${action} name=${mapping.name} usb=${flutterPayload.usb_hid}`,
       );
     }
-    if (!sent) {
+    if (!sent && requiredTransport !== 'flutter') {
       sent = this.sendLegacyKey(mapping, isDown);
+      if (sent) {
+        sentTransport = 'legacy';
+      }
       this.callbacks.log(
         'keyboard_intercepted_legacy',
         `sent=${sent} keyCode=${keyCode} action=${action} name=${mapping.name}`,
@@ -315,17 +348,24 @@ export class RustDeskInputController {
     if (sent) {
       if (isDown) {
         this.interceptedKeysDown.add(keyCode);
+        if (sentTransport !== undefined && requiredTransport === undefined) {
+          this.keyTransports.set(keyCode, sentTransport);
+        }
       } else {
         this.interceptedKeysDown.delete(keyCode);
+        this.keysDown.delete(keyCode);
+        this.keyTransports.delete(keyCode);
       }
       if (mapping.modifier && isDown) {
-        this.activeModifiers.add(mapping.modifier);
+        this.activeModifierKeys.set(keyCode, mapping.modifier);
       }
+    } else if (mapping.modifier && isUp && modifierWasActive) {
+      this.activeModifierKeys.set(keyCode, mapping.modifier);
     }
     return sent;
   }
 
-  releaseKeys(): void {
+  releaseKeys(): boolean {
     const keyCodes: number[] = [];
     this.keysDown.forEach((keyCode: number) => keyCodes.push(keyCode));
     this.interceptedKeysDown.forEach((keyCode: number) => {
@@ -335,21 +375,37 @@ export class RustDeskInputController {
     });
     for (let index = 0; index < keyCodes.length; index++) {
       const keyCode = keyCodes[index];
-      const mapping = mapHarmonyKeyCode(keyCode);
+      const remoteKeyCode = this.remotePhysicalKeyCode(keyCode);
+      const mapping = mapHarmonyKeyCode(remoteKeyCode);
       if (!mapping) {
+        this.keysDown.delete(keyCode);
+        this.interceptedKeysDown.delete(keyCode);
+        this.activeModifierKeys.delete(keyCode);
+        this.keyTransports.delete(keyCode);
         continue;
       }
-      if (mapping.modifier) {
-        this.activeModifiers.delete(mapping.modifier);
+      const usbHid = mapHarmonyKeyCodeToUsbHid(remoteKeyCode);
+      const requiredTransport = this.keyTransports.get(keyCode);
+      let sent = requiredTransport !== 'legacy' && usbHid !== undefined &&
+        this.callbacks.sendFlutterKey(new RustDeskFlutterKeyPayload('', usbHid, 0, false));
+      if (!sent && requiredTransport !== 'flutter') {
+        sent = this.sendLegacyKey(mapping, false);
       }
-      const usbHid = mapHarmonyKeyCodeToUsbHid(keyCode);
-      if (usbHid === undefined || !this.callbacks.sendFlutterKey(new RustDeskFlutterKeyPayload('', usbHid, 0, false))) {
-        this.sendLegacyKey(mapping, false);
+      if (sent) {
+        this.keysDown.delete(keyCode);
+        this.interceptedKeysDown.delete(keyCode);
+        this.activeModifierKeys.delete(keyCode);
+        this.keyTransports.delete(keyCode);
       }
     }
+    return this.keysDown.size === 0 && this.interceptedKeysDown.size === 0;
+  }
+
+  discardKeys(): void {
     this.keysDown.clear();
     this.interceptedKeysDown.clear();
-    this.activeModifiers.clear();
+    this.activeModifierKeys.clear();
+    this.keyTransports.clear();
   }
 
   private keyEventTypeName(type: KeyType): string {
@@ -365,15 +421,33 @@ export class RustDeskInputController {
 
   private sendLegacyKey(mapping: RustDeskKeyMapping, isDown: boolean): boolean {
     const payload = new RustDeskKeyPayload(mapping.name, isDown);
-    payload.alt = this.activeModifiers.has('alt');
-    payload.shift = this.activeModifiers.has('shift');
-    payload.command = this.activeModifiers.has('command');
-    payload.ctrl = this.activeModifiers.has('ctrl');
+    payload.alt = this.isModifierActive('alt');
+    payload.shift = this.isModifierActive('shift');
+    payload.command = this.isModifierActive('command');
+    payload.ctrl = this.isModifierActive('ctrl');
     return this.callbacks.sendKey(payload);
   }
 
-  private buildFlutterKeyPayload(event: KeyEvent, isDown: boolean): RustDeskFlutterKeyPayload | undefined {
-    const usbHid = mapHarmonyKeyCodeToUsbHid(event.keyCode);
+  private isModifierActive(modifier: RustDeskModifierKey): boolean {
+    let active = false;
+    this.activeModifierKeys.forEach((value: RustDeskModifierKey) => {
+      if (value === modifier) {
+        active = true;
+      }
+    });
+    return active;
+  }
+
+  private remotePhysicalKeyCode(keyCode: number): number {
+    return mapHarmonyPhysicalKeyCode(keyCode, this.callbacks.swapPhysicalControlAndMeta());
+  }
+
+  private buildFlutterKeyPayload(
+    event: KeyEvent,
+    remoteKeyCode: number,
+    isDown: boolean,
+  ): RustDeskFlutterKeyPayload | undefined {
+    const usbHid = mapHarmonyKeyCodeToUsbHid(remoteKeyCode);
     if (usbHid === undefined) {
       return undefined;
     }

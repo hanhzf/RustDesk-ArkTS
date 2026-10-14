@@ -130,6 +130,24 @@ const KEYCODE_F12 = 2101;
 const KEYCODE_NUMPAD0 = 2103;
 const KEYCODE_NUMPAD9 = 2112;
 
+export function mapHarmonyPhysicalKeyCode(keyCode: number, swapControlAndMeta: boolean): number {
+  if (!swapControlAndMeta) {
+    return keyCode;
+  }
+  switch (keyCode) {
+    case 2072:
+      return 2076;
+    case 2073:
+      return 2077;
+    case 2076:
+      return 2072;
+    case 2077:
+      return 2073;
+    default:
+      return keyCode;
+  }
+}
+
 function printableFromCode(keyCode: number): string | undefined {
   if (keyCode >= KEYCODE_0 && keyCode <= KEYCODE_9) {
     return String.fromCharCode('0'.charCodeAt(0) + keyCode - KEYCODE_0);
